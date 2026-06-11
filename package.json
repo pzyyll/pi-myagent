@@ -1,0 +1,19 @@
+{
+  "name": "pi-myagent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mr. Julian's local pi package for custom configurations.",
+  "keywords": [
+    "pi-package",
+    "pi-theme",
+    "pi-extension"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/collapse-tools.ts"
+    ]
+  }
+}
