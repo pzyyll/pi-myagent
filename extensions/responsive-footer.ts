@@ -198,6 +198,18 @@ function renderDefaultFooterLines(ctx: any, theme: any, footerData: any, width: 
 	if (contextPercentValue > 90) contextPercent = theme.fg("error", contextPercentDisplay);
 	else if (contextPercentValue > 70) contextPercent = theme.fg("warning", contextPercentDisplay);
 
+	const modelName = ctx.model?.id || "no-model";
+	let modelSide = modelName;
+	if (ctx.model?.reasoning) {
+		const displayedThinkingLevel = thinkingLevel || "off";
+		modelSide =
+			displayedThinkingLevel === "off" ? `${modelName} • thinking off` : `${modelName} • ${displayedThinkingLevel}`;
+	}
+
+	if (footerData.getAvailableProviderCount() > 1 && ctx.model) {
+		modelSide = `(${ctx.model.provider}) ${modelSide}`;
+	}
+
 	const statsParts: string[] = [];
 	if (totalInput) statsParts.push(`↑${formatTokens(totalInput)}`);
 	if (totalOutput) statsParts.push(`↓${formatTokens(totalOutput)}`);
@@ -213,42 +225,32 @@ function renderDefaultFooterLines(ctx: any, theme: any, footerData: any, width: 
 	}
 	statsParts.push(contextPercent);
 
-	let statsLeft = statsParts.join(" ");
-	if (visibleWidth(statsLeft) > width) statsLeft = truncateToWidth(statsLeft, width, "...");
+	let usageSide = statsParts.join(" ");
+	if (visibleWidth(usageSide) > width) usageSide = truncateToWidth(usageSide, width, "...");
 
-	const modelName = ctx.model?.id || "no-model";
-	let rightSideWithoutProvider = modelName;
-	if (ctx.model?.reasoning) {
-		const displayedThinkingLevel = thinkingLevel || "off";
-		rightSideWithoutProvider =
-			displayedThinkingLevel === "off" ? `${modelName} • thinking off` : `${modelName} • ${displayedThinkingLevel}`;
-	}
+	let displayModelSide = modelSide;
+	let footerLine = modelSide;
+	const modelSideWidth = visibleWidth(modelSide);
+	const usageSideWidth = visibleWidth(usageSide);
 
-	let rightSide = rightSideWithoutProvider;
-	if (footerData.getAvailableProviderCount() > 1 && ctx.model) {
-		const withProvider = `(${ctx.model.provider}) ${rightSideWithoutProvider}`;
-		if (visibleWidth(statsLeft) + 2 + visibleWidth(withProvider) <= width) rightSide = withProvider;
-	}
-
-	const statsLeftWidth = visibleWidth(statsLeft);
-	const rightSideWidth = visibleWidth(rightSide);
-	let statsLine = statsLeft;
-
-	if (statsLeftWidth + 2 + rightSideWidth <= width) {
-		statsLine = statsLeft + " ".repeat(width - statsLeftWidth - rightSideWidth) + rightSide;
+	if (modelSideWidth + 2 + usageSideWidth <= width) {
+		footerLine = modelSide + " ".repeat(width - modelSideWidth - usageSideWidth) + usageSide;
 	} else {
-		const availableForRight = width - statsLeftWidth - 2;
-		if (availableForRight > 0) {
-			const truncatedRight = truncateToWidth(rightSide, availableForRight, "");
-			statsLine =
-				statsLeft + " ".repeat(Math.max(2, width - statsLeftWidth - visibleWidth(truncatedRight))) + truncatedRight;
+		const availableForUsage = width - modelSideWidth - 2;
+		if (availableForUsage > 0) {
+			const truncatedUsage = truncateToWidth(usageSide, availableForUsage, "...");
+			footerLine =
+				modelSide + " ".repeat(Math.max(2, width - modelSideWidth - visibleWidth(truncatedUsage))) + truncatedUsage;
+		} else if (modelSideWidth > width) {
+			displayModelSide = truncateToWidth(modelSide, width, "...");
+			footerLine = displayModelSide;
 		}
 	}
 
-	const dimStatsLeft = theme.fg("dim", statsLeft);
-	const dimRemainder = theme.fg("dim", statsLine.slice(statsLeft.length));
+	const dimModelSide = theme.fg("dim", displayModelSide);
+	const dimRemainder = theme.fg("dim", footerLine.slice(displayModelSide.length));
 
-	return [truncateToWidth(theme.fg("dim", pwd), width, theme.fg("dim", "...")), dimStatsLeft + dimRemainder];
+	return [truncateToWidth(theme.fg("dim", pwd), width, theme.fg("dim", "...")), dimModelSide + dimRemainder];
 }
 
 export default function (pi: ExtensionAPI) {
