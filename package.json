@@ -1,19 +1,39 @@
 {
-  "name": "pi-myagent",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Mr. Julian's local pi package for custom configurations.",
-  "keywords": [
-    "pi-package",
-    "pi-theme",
-    "pi-extension"
-  ],
-  "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
-  },
-  "pi": {
-    "extensions": [
-      "./extensions/collapse-tools.ts"
-    ]
-  }
+	"name": "pi-myagent",
+	"version": "0.1.0",
+	"private": true,
+	"packageManager": "bun@1.3.14",
+	"description": "Mr. Julian's local pi package for custom configurations.",
+	"keywords": [
+		"pi-package",
+		"pi-theme",
+		"pi-extension"
+	],
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"lint": "eslint .",
+		"lint:fix": "eslint . --fix",
+		"format": "prettier --write .",
+		"format:check": "prettier --check .",
+		"check": "bun run typecheck && bun run lint && bun run format:check"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*"
+	},
+	"devDependencies": {
+		"@eslint/js": "^10.0.1",
+		"eslint": "^10.5.0",
+		"eslint-config-prettier": "^10.1.8",
+		"prettier": "^3.8.4",
+		"typescript": "^6.0.3",
+		"typescript-eslint": "^8.61.0"
+	},
+	"pi": {
+		"extensions": [
+			"./extensions"
+		],
+		"themes": [
+			"./themes"
+		]
+	}
 }
