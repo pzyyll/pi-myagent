@@ -2,6 +2,7 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const ANSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+const USAGE_BARS_STATUS_KEYS = new Set(["usage-bars", "pi-usage-bars"]);
 
 function stripAnsi(text: string): string {
 	return text.replace(ANSI_RE, "");
@@ -260,8 +261,17 @@ export default function (pi: ExtensionAPI) {
 
 			render(width: number): string[] {
 				const lines = renderDefaultFooterLines(ctx, theme, footerData, width);
-				const statuses = Array.from(footerData.getExtensionStatuses().entries())
-					.sort(([a], [b]) => a.localeCompare(b))
+				const statusEntries = Array.from(footerData.getExtensionStatuses().entries()).sort(([a], [b]) =>
+					a.localeCompare(b),
+				);
+				const usageBarsStatus = statusEntries.find(([key]) => USAGE_BARS_STATUS_KEYS.has(key))?.[1];
+
+				if (usageBarsStatus) {
+					lines.push(truncateToWidth(sanitizeStatusText(usageBarsStatus), width, "..."));
+				}
+
+				const statuses = statusEntries
+					.filter(([key]) => !USAGE_BARS_STATUS_KEYS.has(key))
 					.map(([, text]) => sanitizeStatusText(text));
 
 				if (statuses.length > 0) {
