@@ -4,10 +4,10 @@ Local pi package for Mr. Julian.
 
 ## Included now
 
-- `extensions/collapse-tools.ts` — makes tool call results collapsed by default.
+- `extensions/claude-indicator.ts` — applies a Claude Code-style streaming indicator (`✶ Pouncing…`) with randomized activity verbs.
 - `extensions/responsive-footer.ts` — keeps all third-party footer statuses visible by wrapping them across multiple lines when they exceed terminal width.
 
-Tool output can still be expanded or collapsed manually with pi's `app.tools.expand` keybinding, which defaults to `Ctrl+O`.
+Use `/claude-indicator refresh` to pick a new verb, or `/claude-indicator reset` to restore Pi's default working indicator.
 
 ## Development
 
