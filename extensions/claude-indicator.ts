@@ -223,6 +223,8 @@ interface RuntimeStatus {
 	outputTokens: number;
 	estimatedOutputTokens: number;
 	lastFrameRefreshAt: number;
+	lastProgressAt: number;
+	activeTools: number;
 }
 
 interface IndicatorPalette {
@@ -231,6 +233,7 @@ interface IndicatorPalette {
 	message(text: string): string;
 	messageShimmer(text: string): string;
 	status(text: string): string;
+	stall(text: string): string;
 }
 
 interface RgbColor {
@@ -239,9 +242,10 @@ interface RgbColor {
 	b: number;
 }
 
-function getIndicatorPalette(ctx: ExtensionContext): IndicatorPalette {
+function getIndicatorPalette(ctx: ExtensionContext, stallIntensity = 0): IndicatorPalette {
 	const primary = (text: string) => ctx.ui.theme.fg(INDICATOR_COLOR, text);
 	const shimmer = getDerivedThemeShimmer(ctx, INDICATOR_COLOR);
+	const stall = getStallRenderer(ctx, INDICATOR_COLOR, stallIntensity);
 
 	return {
 		spinner: primary,
@@ -249,6 +253,7 @@ function getIndicatorPalette(ctx: ExtensionContext): IndicatorPalette {
 		message: primary,
 		messageShimmer: shimmer,
 		status: (text) => ctx.ui.theme.fg("dim", text),
+		stall,
 	};
 }
 
@@ -451,11 +456,42 @@ function buildGlimmerMessage(message: string, frameIndex: number, palette: Indic
 		.join("");
 }
 
+// Claude Code reddens the spinner when output stalls and no tools run; match its
+// ERROR_RED target and the 3s-then-2s-ramp curve from useStalledAnimation.
+const STALL_ERROR_RGB: RgbColor = { r: 171, g: 43, b: 63 };
+const STALL_AFTER_MS = 3000;
+const STALL_RAMP_MS = 2000;
+const STALL_FALLBACK_THRESHOLD = 0.5;
+
+function computeStallIntensity(runtime: RuntimeStatus, now: number): number {
+	if (runtime.activeTools > 0) return 0;
+	const idleMs = now - runtime.lastProgressAt;
+	if (idleMs <= STALL_AFTER_MS) return 0;
+	return Math.min((idleMs - STALL_AFTER_MS) / STALL_RAMP_MS, 1);
+}
+
+function getStallRenderer(ctx: ExtensionContext, color: ThemeColorName, intensity: number): (text: string) => string {
+	if (intensity <= 0) return (text) => ctx.ui.theme.fg(color, text);
+
+	const rgb = parseAnsiForeground(ctx.ui.theme.getFgAnsi(color));
+	if (!rgb) {
+		const fallback = intensity > STALL_FALLBACK_THRESHOLD ? "error" : color;
+		return (text) => ctx.ui.theme.fg(fallback, text);
+	}
+
+	const ansi = formatAnsiForeground(
+		mixColors(rgb, STALL_ERROR_RGB, Math.min(intensity, 1)),
+		ctx.ui.theme.getColorMode(),
+	);
+	return (text) => `${ansi}${text}${ANSI_RESET_FG}`;
+}
+
 function buildClaudeIndicator(
 	message: string,
 	statusSuffix = "",
 	phaseOffset = 0,
 	palette: IndicatorPalette,
+	stalled = false,
 ): WorkingIndicatorOptions {
 	const characters = getDefaultCharacters();
 	const spinnerFrames = [...characters, ...[...characters].reverse()];
@@ -466,8 +502,16 @@ function buildClaudeIndicator(
 		frames: Array.from({ length: frameCount }, (_, index) => {
 			const frameIndex = index + phaseOffset;
 			const spinnerFrame = spinnerFrames[frameIndex % spinnerFrames.length]!;
-			const spinner = frameIndex % 4 === 0 ? palette.spinnerShimmer(spinnerFrame) : palette.spinner(spinnerFrame);
-			return `${spinner} ${buildGlimmerMessage(message, frameIndex, palette)}${status}`;
+			let spinner: string;
+			if (stalled) {
+				spinner = palette.stall(spinnerFrame);
+			} else if (frameIndex % 4 === 0) {
+				spinner = palette.spinnerShimmer(spinnerFrame);
+			} else {
+				spinner = palette.spinner(spinnerFrame);
+			}
+			const renderedMessage = stalled ? palette.stall(message) : buildGlimmerMessage(message, frameIndex, palette);
+			return `${spinner} ${renderedMessage}${status}`;
 		}),
 		intervalMs: 100,
 	};
@@ -484,6 +528,8 @@ function createRuntimeStatus(): RuntimeStatus {
 		outputTokens: 0,
 		estimatedOutputTokens: 0,
 		lastFrameRefreshAt: 0,
+		lastProgressAt: Date.now(),
+		activeTools: 0,
 	};
 }
 
@@ -554,12 +600,14 @@ function buildStatusSuffix(runtime: RuntimeStatus, thinkingLevel: string, now = 
 function refreshClaudeIndicator(ctx: ExtensionContext, runtime: RuntimeStatus, thinkingLevel: string): void {
 	const now = Date.now();
 	const phaseOffset = Math.floor((now - runtime.startedAt) / 100);
+	const stallIntensity = computeStallIntensity(runtime, now);
 	ctx.ui.setWorkingIndicator(
 		buildClaudeIndicator(
 			runtime.message,
 			buildStatusSuffix(runtime, thinkingLevel, now),
 			phaseOffset,
-			getIndicatorPalette(ctx),
+			getIndicatorPalette(ctx, stallIntensity),
+			stallIntensity > 0,
 		),
 	);
 	ctx.ui.setWorkingMessage("");
@@ -620,6 +668,7 @@ export default function (pi: ExtensionAPI) {
 		if (mode !== CLAUDE_MODE || !runtime) return;
 		const assistantEvent = event.assistantMessageEvent;
 		const now = Date.now();
+		runtime.lastProgressAt = now;
 		const partial = "partial" in assistantEvent ? assistantEvent.partial : event.message;
 		updateRuntimeFromMessage(partial);
 
@@ -646,7 +695,22 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("message_end", (event, ctx) => {
 		if (mode !== CLAUDE_MODE || !runtime) return;
+		runtime.lastProgressAt = Date.now();
 		updateRuntimeFromMessage(event.message);
+		refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
+	});
+
+	pi.on("tool_execution_start", (_event, ctx) => {
+		if (mode !== CLAUDE_MODE || !runtime) return;
+		runtime.activeTools += 1;
+		runtime.lastProgressAt = Date.now();
+		refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
+	});
+
+	pi.on("tool_execution_end", (_event, ctx) => {
+		if (mode !== CLAUDE_MODE || !runtime) return;
+		runtime.activeTools = Math.max(0, runtime.activeTools - 1);
+		runtime.lastProgressAt = Date.now();
 		refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
 	});
 
