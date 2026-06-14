@@ -1,5 +1,13 @@
 import type { ExtensionAPI, ExtensionContext, WorkingIndicatorOptions } from "@earendil-works/pi-coding-agent";
 
+type ThemeColorName = Parameters<ExtensionContext["ui"]["theme"]["fg"]>[0];
+type ThemeColorMode = ReturnType<ExtensionContext["ui"]["theme"]["getColorMode"]>;
+
+const ANSI_RESET_FG = "\x1b[39m";
+const INDICATOR_COLOR: ThemeColorName = "warning";
+const ANSI_256_CUBE_VALUES = [0, 95, 135, 175, 215, 255] as const;
+const ANSI_256_GRAY_VALUES = Array.from({ length: 24 }, (_, index) => 8 + index * 10);
+
 const SPINNER_VERBS = [
 	"Accomplishing",
 	"Actioning",
@@ -216,14 +224,169 @@ interface IndicatorPalette {
 	status(text: string): string;
 }
 
+interface RgbColor {
+	r: number;
+	g: number;
+	b: number;
+}
+
 function getIndicatorPalette(ctx: ExtensionContext): IndicatorPalette {
+	const primary = (text: string) => ctx.ui.theme.fg(INDICATOR_COLOR, text);
+	const shimmer = getDerivedThemeShimmer(ctx, INDICATOR_COLOR);
+
 	return {
-		spinner: (text) => ctx.ui.theme.fg("border", text),
-		spinnerShimmer: (text) => ctx.ui.theme.fg("borderAccent", text),
-		message: (text) => ctx.ui.theme.fg("border", text),
-		messageShimmer: (text) => ctx.ui.theme.fg("borderAccent", text),
+		spinner: primary,
+		spinnerShimmer: shimmer,
+		message: primary,
+		messageShimmer: shimmer,
 		status: (text) => ctx.ui.theme.fg("dim", text),
 	};
+}
+
+function getDerivedThemeShimmer(ctx: ExtensionContext, color: ThemeColorName): (text: string) => string {
+	const rgb = parseAnsiForeground(ctx.ui.theme.getFgAnsi(color));
+	if (!rgb) return (text) => ctx.ui.theme.fg(color, text);
+
+	const shimmer = deriveShimmerColor(rgb);
+	const ansi = formatAnsiForeground(shimmer, ctx.ui.theme.getColorMode());
+	return (text) => `${ansi}${text}${ANSI_RESET_FG}`;
+}
+
+function parseAnsiForeground(ansi: string): RgbColor | undefined {
+	const trueColor = ansi.match(/\x1b\[38;2;(\d+);(\d+);(\d+)m/);
+	if (trueColor) {
+		return {
+			r: clampColor(Number(trueColor[1])),
+			g: clampColor(Number(trueColor[2])),
+			b: clampColor(Number(trueColor[3])),
+		};
+	}
+
+	const indexedColor = ansi.match(/\x1b\[38;5;(\d+)m/);
+	if (indexedColor) return ansi256ToRgb(clampColor(Number(indexedColor[1])));
+
+	const basicColor = ansi.match(/\x1b\[(3\d|9\d)m/);
+	if (basicColor) return ansi16ToRgb(Number(basicColor[1]));
+
+	return undefined;
+}
+
+function deriveShimmerColor(color: RgbColor): RgbColor {
+	const nearWhite = getLuminance(color) > 0.85 && Math.min(color.r, color.g, color.b) > 180;
+	const target = nearWhite ? { r: 0, g: 0, b: 0 } : { r: 255, g: 255, b: 255 };
+	const amount = nearWhite ? 0.1 : 0.18;
+	return mixColors(color, target, amount);
+}
+
+function getLuminance({ r, g, b }: RgbColor): number {
+	const toLinear = (channel: number) => {
+		const value = channel / 255;
+		return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+	};
+
+	return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+}
+
+function mixColors(from: RgbColor, to: RgbColor, amount: number): RgbColor {
+	return {
+		r: clampColor(from.r + (to.r - from.r) * amount),
+		g: clampColor(from.g + (to.g - from.g) * amount),
+		b: clampColor(from.b + (to.b - from.b) * amount),
+	};
+}
+
+function formatAnsiForeground(color: RgbColor, mode: ThemeColorMode): string {
+	if (mode === "truecolor") return `\x1b[38;2;${color.r};${color.g};${color.b}m`;
+	return `\x1b[38;5;${rgbToAnsi256(color)}m`;
+}
+
+function findClosestValueIndex(value: number, values: readonly number[]): number {
+	let minDistance = Infinity;
+	let minIndex = 0;
+
+	for (let index = 0; index < values.length; index++) {
+		const candidate = values[index]!;
+		const distance = Math.abs(value - candidate);
+		if (distance < minDistance) {
+			minDistance = distance;
+			minIndex = index;
+		}
+	}
+
+	return minIndex;
+}
+
+function colorDistance(from: RgbColor, to: RgbColor): number {
+	const dr = from.r - to.r;
+	const dg = from.g - to.g;
+	const db = from.b - to.b;
+	return dr * dr * 0.299 + dg * dg * 0.587 + db * db * 0.114;
+}
+
+function rgbToAnsi256({ r, g, b }: RgbColor): number {
+	const rIndex = findClosestValueIndex(r, ANSI_256_CUBE_VALUES);
+	const gIndex = findClosestValueIndex(g, ANSI_256_CUBE_VALUES);
+	const bIndex = findClosestValueIndex(b, ANSI_256_CUBE_VALUES);
+	const cubeColor = {
+		r: ANSI_256_CUBE_VALUES[rIndex]!,
+		g: ANSI_256_CUBE_VALUES[gIndex]!,
+		b: ANSI_256_CUBE_VALUES[bIndex]!,
+	};
+	const cubeIndex = 16 + 36 * rIndex + 6 * gIndex + bIndex;
+	const cubeDistance = colorDistance({ r, g, b }, cubeColor);
+
+	const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+	const grayIndex = findClosestValueIndex(gray, ANSI_256_GRAY_VALUES);
+	const grayValue = ANSI_256_GRAY_VALUES[grayIndex]!;
+	const grayDistance = colorDistance({ r, g, b }, { r: grayValue, g: grayValue, b: grayValue });
+	const spread = Math.max(r, g, b) - Math.min(r, g, b);
+
+	if (spread < 10 && grayDistance < cubeDistance) return 232 + grayIndex;
+	return cubeIndex;
+}
+
+function ansi16ToRgb(code: number): RgbColor | undefined {
+	const colors: Record<number, RgbColor> = {
+		30: { r: 0, g: 0, b: 0 },
+		31: { r: 128, g: 0, b: 0 },
+		32: { r: 0, g: 128, b: 0 },
+		33: { r: 128, g: 128, b: 0 },
+		34: { r: 0, g: 0, b: 128 },
+		35: { r: 128, g: 0, b: 128 },
+		36: { r: 0, g: 128, b: 128 },
+		37: { r: 192, g: 192, b: 192 },
+		90: { r: 128, g: 128, b: 128 },
+		91: { r: 255, g: 0, b: 0 },
+		92: { r: 0, g: 255, b: 0 },
+		93: { r: 255, g: 255, b: 0 },
+		94: { r: 0, g: 0, b: 255 },
+		95: { r: 255, g: 0, b: 255 },
+		96: { r: 0, g: 255, b: 255 },
+		97: { r: 255, g: 255, b: 255 },
+	};
+
+	return colors[code];
+}
+
+function ansi256ToRgb(index: number): RgbColor {
+	if (index < 16) return ansi16ToRgb(index < 8 ? index + 30 : index + 82) ?? { r: 255, g: 255, b: 255 };
+
+	if (index >= 232) {
+		const value = 8 + (index - 232) * 10;
+		return { r: value, g: value, b: value };
+	}
+
+	const normalized = index - 16;
+	const r = Math.floor(normalized / 36);
+	const g = Math.floor((normalized % 36) / 6);
+	const b = normalized % 6;
+	const channel = (value: number) => (value === 0 ? 0 : 55 + value * 40);
+
+	return { r: channel(r), g: channel(g), b: channel(b) };
+}
+
+function clampColor(value: number): number {
+	return Math.max(0, Math.min(255, Math.round(value)));
 }
 
 function getDefaultCharacters(): string[] {
