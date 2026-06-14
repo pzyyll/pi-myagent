@@ -218,9 +218,9 @@ interface IndicatorPalette {
 
 function getIndicatorPalette(ctx: ExtensionContext): IndicatorPalette {
 	return {
-		spinner: (text) => ctx.ui.theme.fg("accent", text),
+		spinner: (text) => ctx.ui.theme.fg("border", text),
 		spinnerShimmer: (text) => ctx.ui.theme.fg("borderAccent", text),
-		message: (text) => ctx.ui.theme.fg("accent", text),
+		message: (text) => ctx.ui.theme.fg("border", text),
 		messageShimmer: (text) => ctx.ui.theme.fg("borderAccent", text),
 		status: (text) => ctx.ui.theme.fg("dim", text),
 	};
