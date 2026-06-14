@@ -4,9 +4,17 @@ type ThemeColorName = Parameters<ExtensionContext["ui"]["theme"]["fg"]>[0];
 type ThemeColorMode = ReturnType<ExtensionContext["ui"]["theme"]["getColorMode"]>;
 
 const ANSI_RESET_FG = "\x1b[39m";
-const INDICATOR_COLOR: ThemeColorName = "warning";
+const INDICATOR_COLOR: ThemeColorName = "accent";
+const SHIMMER_CHANNEL_BOOST = 30;
 const ANSI_256_CUBE_VALUES = [0, 95, 135, 175, 215, 255] as const;
 const ANSI_256_GRAY_VALUES = Array.from({ length: 24 }, (_, index) => 8 + index * 10);
+
+const THINKING_STILL_MS = 10_000;
+const THINKING_MORE_MS = 20_000;
+const STATUS_SUFFIX_AFTER_MS = 30_000;
+const THINKING_COMPLETED_SHOWN_MS = 2000;
+const INDICATOR_TICK_MS = 1000;
+const INDICATOR_REFRESH_THROTTLE_MS = 1000;
 
 const SPINNER_VERBS = [
 	"Accomplishing",
@@ -198,7 +206,8 @@ const SPINNER_VERBS = [
 	"Zigzagging",
 ];
 
-type IndicatorMode = "claude" | "default";
+type IndicatorMode = typeof CLAUDE_MODE | "default";
+const CLAUDE_MODE = "claude" as const;
 
 type ThinkingState =
 	| { kind: "idle" }
@@ -273,9 +282,13 @@ function parseAnsiForeground(ansi: string): RgbColor | undefined {
 
 function deriveShimmerColor(color: RgbColor): RgbColor {
 	const nearWhite = getLuminance(color) > 0.85 && Math.min(color.r, color.g, color.b) > 180;
-	const target = nearWhite ? { r: 0, g: 0, b: 0 } : { r: 255, g: 255, b: 255 };
-	const amount = nearWhite ? 0.1 : 0.18;
-	return mixColors(color, target, amount);
+	if (nearWhite) return mixColors(color, { r: 0, g: 0, b: 0 }, 0.1);
+
+	return {
+		r: clampColor(color.r + SHIMMER_CHANNEL_BOOST),
+		g: clampColor(color.g + SHIMMER_CHANNEL_BOOST),
+		b: clampColor(color.b + SHIMMER_CHANNEL_BOOST),
+	};
 }
 
 function getLuminance({ r, g, b }: RgbColor): number {
@@ -474,21 +487,34 @@ function createRuntimeStatus(): RuntimeStatus {
 	};
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && value !== undefined && typeof value === "object";
+}
+
+function hasOwnProp(value: unknown, key: string): value is Record<string, unknown> {
+	return isRecord(value) && key in value;
+}
+
+function hasOwnArray(value: unknown, key: string): value is { [k: string]: unknown } & Record<string, unknown> {
+	return hasOwnProp(value, key) && Array.isArray(value[key]);
+}
+
 function getTextLength(message: unknown): number {
-	if (!message || typeof message !== "object" || !("content" in message) || !Array.isArray(message.content)) return 0;
-	return message.content.reduce((total: number, item: unknown) => {
-		if (!item || typeof item !== "object" || !("type" in item) || item.type !== "text") return total;
-		return total + ("text" in item && typeof item.text === "string" ? item.text.length : 0);
+	if (!hasOwnArray(message, "content")) return 0;
+	return (message.content as unknown[]).reduce((total: number, item: unknown) => {
+		if (!hasOwnProp(item, "type") || item.type !== "text") return total;
+		if (!hasOwnProp(item, "text") || typeof item.text !== "string") return total;
+		return total + item.text.length;
 	}, 0);
 }
 
 function getUsage(message: unknown): { input: number; output: number } {
-	if (!message || typeof message !== "object" || !("usage" in message)) return { input: 0, output: 0 };
+	if (!hasOwnProp(message, "usage")) return { input: 0, output: 0 };
 	const usage = message.usage;
-	if (!usage || typeof usage !== "object") return { input: 0, output: 0 };
+	if (!hasOwnProp(usage, "input") && !hasOwnProp(usage, "output")) return { input: 0, output: 0 };
 	return {
-		input: "input" in usage && typeof usage.input === "number" ? usage.input : 0,
-		output: "output" in usage && typeof usage.output === "number" ? usage.output : 0,
+		input: hasOwnProp(usage, "input") && typeof usage.input === "number" ? usage.input : 0,
+		output: hasOwnProp(usage, "output") && typeof usage.output === "number" ? usage.output : 0,
 	};
 }
 
@@ -497,8 +523,8 @@ function getThinkingText(thinking: ThinkingState, thinkingLevel: string, now: nu
 
 	if (thinking.kind === "active") {
 		const elapsed = now - thinking.startedAt;
-		if (elapsed > 20_000) return `thinking more${effortSuffix}`;
-		if (elapsed > 10_000) return `still thinking${effortSuffix}`;
+		if (elapsed > THINKING_MORE_MS) return `thinking more${effortSuffix}`;
+		if (elapsed > THINKING_STILL_MS) return `still thinking${effortSuffix}`;
 		return `thinking${effortSuffix}`;
 	}
 
@@ -511,7 +537,7 @@ function getThinkingText(thinking: ThinkingState, thinkingLevel: string, now: nu
 
 function buildStatusSuffix(runtime: RuntimeStatus, thinkingLevel: string, now = Date.now()): string {
 	const elapsedMs = now - runtime.startedAt;
-	const showTimerAndTokens = elapsedMs > 30_000;
+	const showTimerAndTokens = elapsedMs > STATUS_SUFFIX_AFTER_MS;
 	const outputTokens = runtime.outputTokens || runtime.estimatedOutputTokens;
 	const parts: string[] = [];
 
@@ -546,17 +572,13 @@ function applyRandomClaudeMessage(ctx: ExtensionContext, thinkingLevel = "off"):
 	return runtime;
 }
 
-function applyClaudeMode(ctx: ExtensionContext, thinkingLevel = "off"): RuntimeStatus {
-	return applyRandomClaudeMessage(ctx, thinkingLevel);
-}
-
 function restoreDefaultMode(ctx: ExtensionContext): void {
 	ctx.ui.setWorkingIndicator();
 	ctx.ui.setWorkingMessage();
 }
 
 export default function (pi: ExtensionAPI) {
-	let mode: IndicatorMode = "claude";
+	let mode: IndicatorMode = CLAUDE_MODE;
 	let runtime: RuntimeStatus | undefined;
 	let tick: ReturnType<typeof setInterval> | undefined;
 
@@ -571,9 +593,9 @@ export default function (pi: ExtensionAPI) {
 	const startTicker = (ctx: ExtensionContext) => {
 		stopTicker();
 		tick = setInterval(() => {
-			if (mode !== "claude" || !runtime) return;
+			if (mode !== CLAUDE_MODE || !runtime) return;
 			refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
-		}, 1000);
+		}, INDICATOR_TICK_MS);
 	};
 
 	const updateRuntimeFromMessage = (message: unknown) => {
@@ -584,18 +606,18 @@ export default function (pi: ExtensionAPI) {
 		runtime.estimatedOutputTokens = Math.max(runtime.estimatedOutputTokens, Math.round(getTextLength(message) / 4));
 	};
 
-	pi.on("session_start", async (_event, ctx) => {
-		if (mode === "claude") runtime = applyClaudeMode(ctx, currentThinkingLevel());
+	pi.on("session_start", (_event, ctx) => {
+		if (mode === CLAUDE_MODE) runtime = applyRandomClaudeMessage(ctx, currentThinkingLevel());
 	});
 
-	pi.on("agent_start", async (_event, ctx) => {
-		if (mode !== "claude") return;
+	pi.on("agent_start", (_event, ctx) => {
+		if (mode !== CLAUDE_MODE) return;
 		runtime = applyRandomClaudeMessage(ctx, currentThinkingLevel());
 		startTicker(ctx);
 	});
 
-	pi.on("message_update", async (event, ctx) => {
-		if (mode !== "claude" || !runtime) return;
+	pi.on("message_update", (event, ctx) => {
+		if (mode !== CLAUDE_MODE || !runtime) return;
 		const assistantEvent = event.assistantMessageEvent;
 		const now = Date.now();
 		const partial = "partial" in assistantEvent ? assistantEvent.partial : event.message;
@@ -609,16 +631,21 @@ export default function (pi: ExtensionAPI) {
 
 		if (assistantEvent.type === "thinking_end") {
 			const startedAt = runtime.thinking.kind === "active" ? runtime.thinking.startedAt : now;
-			runtime.thinking = { kind: "completed", durationMs: now - startedAt, shownUntil: now + 2000 };
+			runtime.thinking = {
+				kind: "completed",
+				durationMs: now - startedAt,
+				shownUntil: now + THINKING_COMPLETED_SHOWN_MS,
+			};
 			refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
 			return;
 		}
 
-		if (now - runtime.lastFrameRefreshAt > 1000) refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
+		if (now - runtime.lastFrameRefreshAt > INDICATOR_REFRESH_THROTTLE_MS)
+			refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
 	});
 
-	pi.on("message_end", async (event, ctx) => {
-		if (mode !== "claude" || !runtime) return;
+	pi.on("message_end", (event, ctx) => {
+		if (mode !== CLAUDE_MODE || !runtime) return;
 		updateRuntimeFromMessage(event.message);
 		refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
 	});
@@ -631,8 +658,8 @@ export default function (pi: ExtensionAPI) {
 		stopTicker();
 	});
 
-	pi.on("thinking_level_select", async (_event, ctx) => {
-		if (mode === "claude" && runtime) refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
+	pi.on("thinking_level_select", (_event, ctx) => {
+		if (mode === CLAUDE_MODE && runtime) refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
 	});
 
 	pi.registerCommand("claude-indicator", {
@@ -640,15 +667,15 @@ export default function (pi: ExtensionAPI) {
 		handler: async (args, ctx) => {
 			const action = args.trim().toLowerCase();
 
-			if (!action || action === "on" || action === "claude") {
-				mode = "claude";
-				runtime = applyClaudeMode(ctx, currentThinkingLevel());
+			if (!action || action === "on" || action === CLAUDE_MODE) {
+				mode = CLAUDE_MODE;
+				runtime = applyRandomClaudeMessage(ctx, currentThinkingLevel());
 				ctx.ui.notify(`Claude indicator enabled: ${runtime.verb}…`, "info");
 				return;
 			}
 
 			if (action === "refresh") {
-				mode = "claude";
+				mode = CLAUDE_MODE;
 				runtime = applyRandomClaudeMessage(ctx, currentThinkingLevel());
 				ctx.ui.notify(`Claude indicator refreshed: ${runtime.verb}…`, "info");
 				return;

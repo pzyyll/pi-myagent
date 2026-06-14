@@ -11,9 +11,9 @@ Terminal, or anything else -- provide the actual colors.
 
 ## Themes
 
-| Theme | Foreground palette | Background |
-|-------|-------------------|------------|
-| `ansi-dark` | Bright ANSI (8--15) | ANSI black |
+| Theme        | Foreground palette   | Background       |
+| ------------ | -------------------- | ---------------- |
+| `ansi-dark`  | Bright ANSI (8--15)  | ANSI black       |
 | `ansi-light` | Standard ANSI (0--7) | Terminal default |
 
 No hex, no 256-color, no grayscale ramp. Colors come from your terminal and
