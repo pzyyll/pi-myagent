@@ -16,6 +16,17 @@ const THINKING_COMPLETED_SHOWN_MS = 2000;
 const INDICATOR_TICK_MS = 1000;
 const INDICATOR_REFRESH_THROTTLE_MS = 1000;
 
+// Thinking shimmer: independent gray breathing glow, per Claude Code
+const THINKING_INACTIVE: RgbColor = { r: 153, g: 153, b: 153 };
+const THINKING_INACTIVE_SHIMMER: RgbColor = { r: 185, g: 185, b: 185 };
+const THINKING_GLOW_PERIOD_MS = 2000;
+const THINKING_GLOW_DELAY_MS = 3000;
+
+// Glimmer cadence: use Claude's requesting/responding speeds, and apply the
+// same frame cadence to both spinner shimmer and message shimmer.
+const GLIMMER_INTERVAL_REQUESTING_MS = 50;
+const GLIMMER_INTERVAL_RESPONDING_MS = 200;
+
 const SPINNER_VERBS = [
 	"Accomplishing",
 	"Actioning",
@@ -225,6 +236,7 @@ interface RuntimeStatus {
 	lastFrameRefreshAt: number;
 	lastProgressAt: number;
 	activeTools: number;
+	requesting: boolean;
 }
 
 interface IndicatorPalette {
@@ -419,6 +431,10 @@ function sample<T>(items: readonly T[]): T {
 	return items[Math.floor(Math.random() * items.length)]!;
 }
 
+function getGlimmerIntervalMs(requesting: boolean): number {
+	return requesting ? GLIMMER_INTERVAL_REQUESTING_MS : GLIMMER_INTERVAL_RESPONDING_MS;
+}
+
 function formatDuration(ms: number): string {
 	const totalSeconds = Math.max(0, Math.floor(ms / 1000));
 	const hours = Math.floor(totalSeconds / 3600);
@@ -438,10 +454,17 @@ function formatTokens(count: number): string {
 	return `${Math.round(count / 1000000)}M`;
 }
 
-function buildGlimmerMessage(message: string, frameIndex: number, palette: IndicatorPalette): string {
+function buildGlimmerMessage(
+	message: string,
+	frameIndex: number,
+	palette: IndicatorPalette,
+	requesting = false,
+): string {
 	const graphemes = Array.from(message);
 	const cycleLength = graphemes.length + 20;
-	const glimmerIndex = graphemes.length + 10 - (frameIndex % cycleLength);
+	const glimmerIndex = requesting
+		? (frameIndex % cycleLength) - 10
+		: graphemes.length + 10 - (frameIndex % cycleLength);
 	const shimmerStart = glimmerIndex - 1;
 	const shimmerEnd = glimmerIndex + 1;
 
@@ -488,15 +511,20 @@ function getStallRenderer(ctx: ExtensionContext, color: ThemeColorName, intensit
 
 function buildClaudeIndicator(
 	message: string,
-	statusSuffix = "",
+	prefixParts: string[],
+	thinkingText: string | undefined,
+	thinking: ThinkingState,
+	requesting: boolean,
 	phaseOffset = 0,
 	palette: IndicatorPalette,
+	colorMode: ThemeColorMode,
 	stalled = false,
+	now = Date.now(),
 ): WorkingIndicatorOptions {
 	const characters = getDefaultCharacters();
 	const spinnerFrames = [...characters, ...[...characters].reverse()];
 	const frameCount = Math.max(spinnerFrames.length, Array.from(message).length + 20);
-	const status = statusSuffix ? palette.status(` ${statusSuffix}`) : "";
+	const intervalMs = getGlimmerIntervalMs(requesting);
 
 	return {
 		frames: Array.from({ length: frameCount }, (_, index) => {
@@ -510,14 +538,32 @@ function buildClaudeIndicator(
 			} else {
 				spinner = palette.spinner(spinnerFrame);
 			}
-			const renderedMessage = stalled ? palette.stall(message) : buildGlimmerMessage(message, frameIndex, palette);
+			const renderedMessage = stalled
+				? palette.stall(message)
+				: buildGlimmerMessage(message, frameIndex, palette, requesting);
+			// Prefix in dim, thinking text in independent gray breathing shimmer
+			const frameTime = now + index * intervalMs;
+			const thinkingColor =
+				thinkingText && thinking.kind === "active"
+					? computeThinkingColorAnsi(thinking, frameTime, colorMode)
+					: undefined;
+			const statusParts = prefixParts.map((part) => palette.status(part));
+			if (thinkingText) {
+				statusParts.push(
+					thinkingColor ? `${thinkingColor}${thinkingText}${ANSI_RESET_FG}` : palette.status(thinkingText),
+				);
+			}
+			const status = statusParts.length
+				? ` ${palette.status("(")}${statusParts.join(palette.status(" · "))}${palette.status(")")}`
+				: "";
+
 			return `${spinner} ${renderedMessage}${status}`;
 		}),
-		intervalMs: 100,
+		intervalMs,
 	};
 }
 
-function createRuntimeStatus(): RuntimeStatus {
+function createRuntimeStatus(requesting = false): RuntimeStatus {
 	const verb = sample(SPINNER_VERBS);
 	return {
 		verb,
@@ -530,6 +576,7 @@ function createRuntimeStatus(): RuntimeStatus {
 		lastFrameRefreshAt: 0,
 		lastProgressAt: Date.now(),
 		activeTools: 0,
+		requesting,
 	};
 }
 
@@ -581,41 +628,64 @@ function getThinkingText(thinking: ThinkingState, thinkingLevel: string, now: nu
 	return undefined;
 }
 
-function buildStatusSuffix(runtime: RuntimeStatus, thinkingLevel: string, now = Date.now()): string {
+function buildStatusParts(
+	runtime: RuntimeStatus,
+	thinkingLevel: string,
+	now = Date.now(),
+): { prefixParts: string[]; thinking: string | undefined } {
 	const elapsedMs = now - runtime.startedAt;
 	const showTimerAndTokens = elapsedMs > STATUS_SUFFIX_AFTER_MS;
 	const outputTokens = runtime.outputTokens || runtime.estimatedOutputTokens;
-	const parts: string[] = [];
+	const prefixParts: string[] = [];
 
-	if (showTimerAndTokens) parts.push(formatDuration(elapsedMs));
-	if (showTimerAndTokens && runtime.inputTokens > 0) parts.push(`↑ ${formatTokens(runtime.inputTokens)}`);
-	if (showTimerAndTokens && outputTokens > 0) parts.push(`↓ ${formatTokens(outputTokens)} tokens`);
+	if (showTimerAndTokens) prefixParts.push(formatDuration(elapsedMs));
+	if (showTimerAndTokens && runtime.inputTokens > 0) prefixParts.push(`↑ ${formatTokens(runtime.inputTokens)}`);
+	if (showTimerAndTokens && outputTokens > 0) prefixParts.push(`↓ ${formatTokens(outputTokens)} tokens`);
 
-	const thinkingText = getThinkingText(runtime.thinking, thinkingLevel, now);
-	if (thinkingText) parts.push(thinkingText);
+	return {
+		prefixParts,
+		thinking: getThinkingText(runtime.thinking, thinkingLevel, now),
+	};
+}
 
-	return parts.length > 0 ? `(${parts.join(" · ")})` : "";
+function computeThinkingColorAnsi(
+	thinking: ThinkingState,
+	frameTimeMs: number,
+	colorMode: ThemeColorMode,
+): string | undefined {
+	if (thinking.kind !== "active") return undefined;
+	const elapsed = frameTimeMs - thinking.startedAt - THINKING_GLOW_DELAY_MS;
+	if (elapsed < 0) return undefined;
+	const opacity = (Math.sin((elapsed / THINKING_GLOW_PERIOD_MS) * Math.PI * 2) + 1) / 2;
+	return formatAnsiForeground(mixColors(THINKING_INACTIVE, THINKING_INACTIVE_SHIMMER, opacity), colorMode);
 }
 
 function refreshClaudeIndicator(ctx: ExtensionContext, runtime: RuntimeStatus, thinkingLevel: string): void {
 	const now = Date.now();
-	const phaseOffset = Math.floor((now - runtime.startedAt) / 100);
+	const intervalMs = getGlimmerIntervalMs(runtime.requesting);
+	const phaseOffset = Math.floor((now - runtime.startedAt) / intervalMs);
 	const stallIntensity = computeStallIntensity(runtime, now);
+	const { prefixParts, thinking } = buildStatusParts(runtime, thinkingLevel, now);
 	ctx.ui.setWorkingIndicator(
 		buildClaudeIndicator(
 			runtime.message,
-			buildStatusSuffix(runtime, thinkingLevel, now),
+			prefixParts,
+			thinking,
+			runtime.thinking,
+			runtime.requesting,
 			phaseOffset,
 			getIndicatorPalette(ctx, stallIntensity),
+			ctx.ui.theme.getColorMode(),
 			stallIntensity > 0,
+			now,
 		),
 	);
 	ctx.ui.setWorkingMessage("");
 	runtime.lastFrameRefreshAt = now;
 }
 
-function applyRandomClaudeMessage(ctx: ExtensionContext, thinkingLevel = "off"): RuntimeStatus {
-	const runtime = createRuntimeStatus();
+function applyRandomClaudeMessage(ctx: ExtensionContext, thinkingLevel = "off", requesting = false): RuntimeStatus {
+	const runtime = createRuntimeStatus(requesting);
 	refreshClaudeIndicator(ctx, runtime, thinkingLevel);
 	return runtime;
 }
@@ -660,7 +730,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("agent_start", (_event, ctx) => {
 		if (mode !== CLAUDE_MODE) return;
-		runtime = applyRandomClaudeMessage(ctx, currentThinkingLevel());
+		runtime = applyRandomClaudeMessage(ctx, currentThinkingLevel(), true);
 		startTicker(ctx);
 	});
 
@@ -668,6 +738,8 @@ export default function (pi: ExtensionAPI) {
 		if (mode !== CLAUDE_MODE || !runtime) return;
 		const assistantEvent = event.assistantMessageEvent;
 		const now = Date.now();
+		const wasRequesting = runtime.requesting;
+		runtime.requesting = false;
 		runtime.lastProgressAt = now;
 		const partial = "partial" in assistantEvent ? assistantEvent.partial : event.message;
 		updateRuntimeFromMessage(partial);
@@ -689,7 +761,7 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		if (now - runtime.lastFrameRefreshAt > INDICATOR_REFRESH_THROTTLE_MS)
+		if (wasRequesting || now - runtime.lastFrameRefreshAt > INDICATOR_REFRESH_THROTTLE_MS)
 			refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
 	});
 

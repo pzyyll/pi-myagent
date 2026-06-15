@@ -33,3 +33,6 @@ coverage/
 # Misc
 .cache/
 *.tgz
+
+.pi*
+.claude
