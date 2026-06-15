@@ -385,7 +385,7 @@ function getIndicatorPalette(ctx: ExtensionContext, color: ResolvedColor, stallI
 	const primary = color.fg;
 	const shimmer = getDerivedThemeShimmer(ctx, color);
 	const flash = getFlashRenderer(ctx, color);
-	const ramp = getRampRenderer(ctx, color);
+	const ramp = getRampRenderer(ctx, color, THINKING_SHIMMER_COLOR!);
 	const stall = getStallRenderer(ctx, color, stallIntensity);
 
 	const thinkingColors = getThinkingShimmerColors(ctx, THINKING_SHIMMER_COLOR!);
@@ -440,21 +440,23 @@ function getFlashRenderer(ctx: ExtensionContext, color: ResolvedColor): (text: s
 	};
 }
 
-// Long-think ramp: the breathing centre drifts from the base colour toward the
-// derived shimmer by `progress` (0 = base, 1 = shimmer), and each breath pulses
-// between that centre and a slightly lighter version of it via `opacity`.  Used
-// for spinner + message once a think passes THINKING_STILL_MS.
+// Long-think ramp: the breathing centre drifts from the base indicator colour
+// toward the thinking shimmer colour by `progress` (0 = indicator, 1 = thinking
+// shimmer), and each breath pulses between that centre and a slightly lighter
+// version of it via `opacity`.  Used for spinner + message once a think passes
+// THINKING_STILL_MS, so they land on the same colour as the thinking text.
 function getRampRenderer(
 	ctx: ExtensionContext,
 	color: ResolvedColor,
+	target: ResolvedColor,
 ): (text: string, progress: number, opacity: number) => string {
 	const rgb = color.rgb;
-	if (!rgb) return (text) => color.fg(text);
+	const targetRgb = target.rgb;
+	if (!rgb || !targetRgb) return (text) => color.fg(text);
 
-	const shimmer = deriveShimmerColor(rgb);
 	const mode = ctx.ui.theme.getColorMode();
 	return (text, progress, opacity) => {
-		const center = mixColors(rgb, shimmer, Math.max(0, Math.min(1, progress)));
+		const center = mixColors(rgb, targetRgb, Math.max(0, Math.min(1, progress)));
 		const glow = lightenColor(center, THINKING_GLOW_LIGHTNESS_BOOST);
 		const mixed = mixColors(center, glow, Math.max(0, Math.min(1, opacity)));
 		return `${formatAnsiForeground(mixed, mode)}${text}${ANSI_RESET_FG}`;
