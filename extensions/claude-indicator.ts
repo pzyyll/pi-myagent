@@ -331,7 +331,7 @@ function getIndicatorPalette(ctx: ExtensionContext, color: ResolvedColor, stallI
 	const shimmer = getDerivedThemeShimmer(ctx, color);
 	const stall = getStallRenderer(ctx, color, stallIntensity);
 
-	const thinkingColors = getThinkingShimmerColors(ctx);
+	const thinkingColors = getThinkingShimmerColors(ctx, color);
 
 	return {
 		spinner: primary,
@@ -347,11 +347,14 @@ function getIndicatorPalette(ctx: ExtensionContext, color: ResolvedColor, stallI
 const THINKING_INACTIVE: RgbColor = { r: 153, g: 153, b: 153 };
 const THINKING_INACTIVE_SHIMMER: RgbColor = { r: 185, g: 185, b: 185 };
 
-function getThinkingShimmerColors(ctx: ExtensionContext): { base: RgbColor; shimmer: RgbColor } {
+function getThinkingShimmerColors(
+	ctx: ExtensionContext,
+	indicator: ResolvedColor,
+): { base: RgbColor; shimmer: RgbColor } {
 	const dimAnsi = ctx.ui.theme.getFgAnsi("dim");
-	const baseRgb = parseAnsiForeground(dimAnsi);
-	if (!baseRgb) return { base: THINKING_INACTIVE, shimmer: THINKING_INACTIVE_SHIMMER };
-	return { base: baseRgb, shimmer: deriveShimmerColor(baseRgb) };
+	const baseRgb = parseAnsiForeground(dimAnsi) ?? THINKING_INACTIVE;
+	const shimmerRgb = indicator.rgb ?? THINKING_INACTIVE_SHIMMER;
+	return { base: baseRgb, shimmer: shimmerRgb };
 }
 
 function getDerivedThemeShimmer(ctx: ExtensionContext, color: ResolvedColor): (text: string) => string {
