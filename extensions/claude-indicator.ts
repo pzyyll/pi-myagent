@@ -12,6 +12,13 @@ const DEFAULT_INDICATOR_COLOR = "accent";
 // the breathing thinking text ramps toward this rather than the spinner colour.
 const DEFAULT_THINKING_SHIMMER_COLOR = "warning";
 
+// settings.json section + keys this extension reads (see README "Configuration").
+const SETTINGS_SECTION = "claudeIndicator";
+const SETTING_DEFAULT_COLOR = "defaultColor";
+const SETTING_THINKING_SHIMMER_COLOR = "thinkingShimmerColor";
+const SETTING_SHIMMER_HUE_SHIFT = "shimmerHueShift";
+const SETTING_SHIMMER_LIGHTNESS_BOOST = "shimmerLightnessBoost";
+
 // ---------------------------------------------------------------------------
 // Resolved color: decouples colour consumers from the source (theme name or
 // hex literal).  Every resolved colour carries an RGB for shimmer/stall
@@ -76,7 +83,7 @@ function loadClaudeIndicatorSetting(cwd: string, key: string, fallback: string):
 		try {
 			const raw = readFileSync(path, "utf-8");
 			const settings = JSON.parse(raw) as Record<string, unknown>;
-			const section = settings.claudeIndicator;
+			const section = settings[SETTINGS_SECTION];
 			if (typeof section === "object" && section !== null) {
 				const value = (section as Record<string, unknown>)[key];
 				if (typeof value === "string" && value.trim()) return value.trim();
@@ -98,7 +105,7 @@ function loadClaudeIndicatorNumber(cwd: string, key: string, fallback: number): 
 		try {
 			const raw = readFileSync(path, "utf-8");
 			const settings = JSON.parse(raw) as Record<string, unknown>;
-			const section = settings.claudeIndicator;
+			const section = settings[SETTINGS_SECTION];
 			if (typeof section === "object" && section !== null) {
 				const value = (section as Record<string, unknown>)[key];
 				if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -1239,17 +1246,17 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", (_event, ctx) => {
-		const indicatorRaw = loadClaudeIndicatorSetting(ctx.cwd, "defaultColor", DEFAULT_INDICATOR_COLOR);
+		const indicatorRaw = loadClaudeIndicatorSetting(ctx.cwd, SETTING_DEFAULT_COLOR, DEFAULT_INDICATOR_COLOR);
 		INDICATOR_COLOR = resolveColor(ctx, indicatorRaw);
 		THINKING_SHIMMER_COLOR = resolveColor(
 			ctx,
-			loadClaudeIndicatorSetting(ctx.cwd, "thinkingShimmerColor", DEFAULT_THINKING_SHIMMER_COLOR),
+			loadClaudeIndicatorSetting(ctx.cwd, SETTING_THINKING_SHIMMER_COLOR, DEFAULT_THINKING_SHIMMER_COLOR),
 			DEFAULT_THINKING_SHIMMER_COLOR,
 		);
-		SHIMMER_HUE_SHIFT = loadClaudeIndicatorNumber(ctx.cwd, "shimmerHueShift", DEFAULT_SHIMMER_HUE_SHIFT);
+		SHIMMER_HUE_SHIFT = loadClaudeIndicatorNumber(ctx.cwd, SETTING_SHIMMER_HUE_SHIFT, DEFAULT_SHIMMER_HUE_SHIFT);
 		SHIMMER_LIGHTNESS_BOOST = loadClaudeIndicatorNumber(
 			ctx.cwd,
-			"shimmerLightnessBoost",
+			SETTING_SHIMMER_LIGHTNESS_BOOST,
 			DEFAULT_SHIMMER_LIGHTNESS_BOOST,
 		);
 		if (mode === CLAUDE_MODE) runtime = applyRandomClaudeMessage(ctx, currentThinkingLevel());

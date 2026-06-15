@@ -2,10 +2,6 @@
 
 These are some of my personal custom feature extensions and theme styles for Pi.
 
-## Source Code Path
-
-- `Claude Code`: `@/home/julian/workspace/source/claude-code-2.1.88/package-src/src`
-
 ## Package tool
 
 Use `bun` as the package manager, and prefer using it, including `bunx`.
@@ -19,4 +15,8 @@ Here are some commonly used commands:
 
 ## Coding Style
 
-- ⚠️Keep comments to a minimum, and only add them where special explanation is needed
+- ⚠️Keep comments to a minimum. Let the code speak for itself, and only add comments where things might be hard to understand.
+
+## References
+
+- `Claude Code` source code path: `@/home/julian/workspace/source/claude-code-2.1.88/package-src/src`
