@@ -1323,18 +1323,18 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			if (action === "test" || action === "preview") {
+			if (action === "preview") {
 				if (previewTick) {
 					stopPreview(ctx);
 					ctx.ui.notify("Claude indicator preview stopped.", "info");
 				} else {
 					startPreview(ctx);
-					ctx.ui.notify("Claude indicator preview started; run /claude-indicator test again to stop.", "info");
+					ctx.ui.notify("Claude indicator preview started; run /claude-indicator preview again to stop.", "info");
 				}
 				return;
 			}
 
-			ctx.ui.notify("Usage: /claude-indicator [on|refresh|reset|test]", "error");
+			ctx.ui.notify("Usage: /claude-indicator [on|refresh|reset|preview]", "error");
 		},
 	});
 }
