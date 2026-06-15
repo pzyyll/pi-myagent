@@ -962,8 +962,12 @@ function computeThinkingColorAnsi(
 	return formatAnsiForeground(mixColors(center, glow, opacity), colorMode);
 }
 
-function refreshClaudeIndicator(ctx: ExtensionContext, runtime: RuntimeStatus, thinkingLevel: string): void {
-	const now = Date.now();
+function computeIndicatorOptions(
+	ctx: ExtensionContext,
+	runtime: RuntimeStatus,
+	thinkingLevel: string,
+	now: number,
+): WorkingIndicatorOptions {
 	const intervalMs = getGlimmerIntervalMs(runtime.requesting);
 	const phaseOffset = Math.floor((now - runtime.startedAt) / intervalMs);
 	const stallIntensity = computeStallIntensity(runtime, now);
@@ -972,21 +976,24 @@ function refreshClaudeIndicator(ctx: ExtensionContext, runtime: RuntimeStatus, t
 	// tools run), but stall takes priority inside buildClaudeIndicator anyway.
 	const toolUse = stallIntensity <= 0 && runtime.activeTools > 0;
 	const { prefixParts, thinking } = buildStatusParts(runtime, thinkingLevel, now);
-	ctx.ui.setWorkingIndicator(
-		buildClaudeIndicator(
-			runtime.message,
-			prefixParts,
-			thinking,
-			runtime.thinking,
-			runtime.requesting,
-			phaseOffset,
-			getIndicatorPalette(ctx, INDICATOR_COLOR!, stallIntensity),
-			ctx.ui.theme.getColorMode(),
-			stallIntensity > 0,
-			toolUse,
-			now,
-		),
+	return buildClaudeIndicator(
+		runtime.message,
+		prefixParts,
+		thinking,
+		runtime.thinking,
+		runtime.requesting,
+		phaseOffset,
+		getIndicatorPalette(ctx, INDICATOR_COLOR!, stallIntensity),
+		ctx.ui.theme.getColorMode(),
+		stallIntensity > 0,
+		toolUse,
+		now,
 	);
+}
+
+function refreshClaudeIndicator(ctx: ExtensionContext, runtime: RuntimeStatus, thinkingLevel: string): void {
+	const now = Date.now();
+	ctx.ui.setWorkingIndicator(computeIndicatorOptions(ctx, runtime, thinkingLevel, now));
 	ctx.ui.setWorkingMessage("");
 	runtime.lastFrameRefreshAt = now;
 }
@@ -1002,10 +1009,125 @@ function restoreDefaultMode(ctx: ExtensionContext): void {
 	ctx.ui.setWorkingMessage();
 }
 
+// ---------------------------------------------------------------------------
+// Preview harness: render every indicator phase into a widget driven by a
+// virtual clock, so the animation can be inspected without sending a request.
+// It reuses the real render path (computeIndicatorOptions) verbatim; the only
+// difference is that time is supplied by the harness instead of a live turn.
+// ---------------------------------------------------------------------------
+
+// Total length of the virtual timeline; loops so long-think phases are visible.
+const PREVIEW_CYCLE_MS = 26_000;
+
+interface PreviewScenario {
+	label: string;
+	// Build a RuntimeStatus anchored to `wallNow`, given the virtual elapsed time
+	// `v` (0..PREVIEW_CYCLE_MS) so phases that depend on elapsed time animate.
+	build(wallNow: number, v: number): RuntimeStatus;
+	thinkingLevel?: string;
+}
+
+function previewBaseRuntime(wallNow: number, message: string, requesting: boolean): RuntimeStatus {
+	return {
+		verb: message.replace(/…$/, ""),
+		message,
+		startedAt: wallNow,
+		thinking: { kind: "idle" },
+		inputTokens: 0,
+		outputTokens: 0,
+		estimatedOutputTokens: 0,
+		lastFrameRefreshAt: 0,
+		lastProgressAt: wallNow,
+		activeTools: 0,
+		requesting,
+	};
+}
+
+const PREVIEW_SCENARIOS: PreviewScenario[] = [
+	{
+		label: "1. requesting (sweep ←, 50ms)",
+		build: (wallNow) => previewBaseRuntime(wallNow, "Requesting…", true),
+	},
+	{
+		label: "2. responding (sweep →, 200ms)",
+		build: (wallNow) => previewBaseRuntime(wallNow, "Responding…", false),
+	},
+	{
+		label: "3. tool-use (whole-word flash)",
+		build: (wallNow) => {
+			const r = previewBaseRuntime(wallNow, "Tooling…", false);
+			r.activeTools = 1;
+			return r;
+		},
+	},
+	{
+		label: "4. stalled (fades to red after 3s)",
+		build: (wallNow, v) => {
+			const r = previewBaseRuntime(wallNow, "Stalling…", false);
+			// Anchor last progress so stall intensity tracks the virtual clock.
+			r.lastProgressAt = wallNow - v;
+			return r;
+		},
+	},
+	{
+		label: "5. thinking ramp (0→24s: dim→indicator, spinner/msg base→shimmer)",
+		thinkingLevel: "high",
+		build: (wallNow, v) => {
+			const r = previewBaseRuntime(wallNow, "Thinking…", false);
+			// Anchor the think start so elapsed == v drives sweep→ramp + breathing.
+			r.thinking = { kind: "active", startedAt: wallNow - v };
+			r.startedAt = wallNow - v;
+			return r;
+		},
+	},
+];
+
+// Pick the single frame that the live indicator would currently display, using
+// the same interval/phase math as the real animation loop.
+function previewCurrentFrame(opts: WorkingIndicatorOptions, wallNow: number): string {
+	const frames = opts.frames ?? [];
+	if (frames.length === 0) return "";
+	const interval = opts.intervalMs && opts.intervalMs > 0 ? opts.intervalMs : INDICATOR_TICK_MS;
+	const idx = Math.floor(wallNow / interval) % frames.length;
+	return frames[idx]!;
+}
+
+// Truncate to `width` visible columns while passing ANSI SGR escapes through
+// uncounted. Approximates every visible grapheme as one column (the preview
+// content is ASCII plus single-width spinner glyphs), and resets colour at the
+// cut so a clipped escape can't bleed past the line end.
+function truncateAnsiToWidth(text: string, width: number): string {
+	if (width <= 0) return "";
+	let out = "";
+	let visible = 0;
+	let truncated = false;
+	for (let i = 0; i < text.length; ) {
+		if (text[i] === "\x1b") {
+			const end = text.indexOf("m", i);
+			if (end !== -1) {
+				out += text.slice(i, end + 1);
+				i = end + 1;
+				continue;
+			}
+		}
+		if (visible >= width) {
+			truncated = true;
+			break;
+		}
+		const ch = Array.from(text.slice(i))[0]!;
+		out += ch;
+		visible += 1;
+		i += ch.length;
+	}
+	return truncated ? `${out}${ANSI_RESET_FG}` : out;
+}
+
 export default function (pi: ExtensionAPI) {
 	let mode: IndicatorMode = CLAUDE_MODE;
 	let runtime: RuntimeStatus | undefined;
 	let tick: ReturnType<typeof setInterval> | undefined;
+	let previewTick: ReturnType<typeof setInterval> | undefined;
+	let previewStartedAt = 0;
 
 	const currentThinkingLevel = () => String(pi.getThinkingLevel?.() ?? "off");
 
@@ -1021,6 +1143,47 @@ export default function (pi: ExtensionAPI) {
 			if (mode !== CLAUDE_MODE || !runtime) return;
 			refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
 		}, INDICATOR_TICK_MS);
+	};
+
+	const stopPreview = (ctx: ExtensionContext) => {
+		if (previewTick) {
+			clearInterval(previewTick);
+			previewTick = undefined;
+		}
+		ctx.ui.setWidget("claude-indicator-preview", undefined);
+	};
+
+	// Render all scenarios as widget lines for the current virtual time. Picks
+	// the live frame per scenario from the real render path, so what shows here
+	// is exactly what a real turn would display at that elapsed time.
+	const renderPreviewLines = (ctx: ExtensionContext, wallNow: number, width: number): string[] => {
+		const v = (wallNow - previewStartedAt) % PREVIEW_CYCLE_MS;
+		const seconds = (v / 1000).toFixed(1);
+		const dim = (t: string) => ctx.ui.theme.fg("dim", t);
+		const lines: string[] = [dim(`claude-indicator preview · virtual t=${seconds}s · /claude-indicator test to stop`)];
+		for (const scenario of PREVIEW_SCENARIOS) {
+			const rt = scenario.build(wallNow, v);
+			const opts = computeIndicatorOptions(ctx, rt, scenario.thinkingLevel ?? "off", wallNow);
+			lines.push(dim(scenario.label));
+			lines.push(`  ${previewCurrentFrame(opts, wallNow)}`);
+		}
+		return lines.map((line) => truncateAnsiToWidth(line, width));
+	};
+
+	const startPreview = (ctx: ExtensionContext) => {
+		previewStartedAt = Date.now();
+		let tuiRef: { requestRender(): void } | undefined;
+		ctx.ui.setWidget("claude-indicator-preview", (tui) => {
+			tuiRef = tui;
+			return {
+				render: (width: number) => renderPreviewLines(ctx, Date.now(), width),
+				invalidate: () => {},
+				dispose: () => {},
+			};
+		});
+		if (previewTick) clearInterval(previewTick);
+		// Drive at ~20fps so the 50ms-cadence requesting sweep looks smooth.
+		previewTick = setInterval(() => tuiRef?.requestRender(), 50);
 	};
 
 	const updateRuntimeFromMessage = (message: unknown) => {
@@ -1110,8 +1273,9 @@ export default function (pi: ExtensionAPI) {
 		stopTicker();
 	});
 
-	pi.on("session_shutdown", async () => {
+	pi.on("session_shutdown", async (_event, ctx) => {
 		stopTicker();
+		stopPreview(ctx);
 	});
 
 	pi.on("thinking_level_select", (_event, ctx) => {
@@ -1146,7 +1310,18 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			ctx.ui.notify("Usage: /claude-indicator [on|refresh|reset]", "error");
+			if (action === "test" || action === "preview") {
+				if (previewTick) {
+					stopPreview(ctx);
+					ctx.ui.notify("Claude indicator preview stopped.", "info");
+				} else {
+					startPreview(ctx);
+					ctx.ui.notify("Claude indicator preview started; run /claude-indicator test again to stop.", "info");
+				}
+				return;
+			}
+
+			ctx.ui.notify("Usage: /claude-indicator [on|refresh|reset|test]", "error");
 		},
 	});
 }
