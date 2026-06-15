@@ -361,6 +361,7 @@ interface IndicatorPalette {
 	spinnerShimmer(text: string): string;
 	message(text: string): string;
 	messageShimmer(text: string): string;
+	messageFlash(text: string, opacity: number): string;
 	status(text: string): string;
 	stall(text: string): string;
 	thinking: { base: RgbColor; shimmer: RgbColor };
@@ -375,6 +376,7 @@ interface RgbColor {
 function getIndicatorPalette(ctx: ExtensionContext, color: ResolvedColor, stallIntensity = 0): IndicatorPalette {
 	const primary = color.fg;
 	const shimmer = getDerivedThemeShimmer(ctx, color);
+	const flash = getFlashRenderer(ctx, color);
 	const stall = getStallRenderer(ctx, color, stallIntensity);
 
 	const thinkingColors = getThinkingShimmerColors(ctx, THINKING_SHIMMER_COLOR!);
@@ -384,6 +386,7 @@ function getIndicatorPalette(ctx: ExtensionContext, color: ResolvedColor, stallI
 		spinnerShimmer: shimmer,
 		message: primary,
 		messageShimmer: shimmer,
+		messageFlash: flash,
 		status: (text) => ctx.ui.theme.fg("dim", text),
 		stall,
 		thinking: thinkingColors,
@@ -410,6 +413,21 @@ function getDerivedThemeShimmer(ctx: ExtensionContext, color: ResolvedColor): (t
 	const shimmer = deriveShimmerColor(rgb);
 	const ansi = formatAnsiForeground(shimmer, ctx.ui.theme.getColorMode());
 	return (text) => `${ansi}${text}${ANSI_RESET_FG}`;
+}
+
+// Tool-use flash: the whole message pulses between the base colour and the
+// derived shimmer colour by `opacity` (0 = base, 1 = shimmer), instead of the
+// sweeping glimmer window.  Mirrors Claude Code's tool-use GlimmerMessage path.
+function getFlashRenderer(ctx: ExtensionContext, color: ResolvedColor): (text: string, opacity: number) => string {
+	const rgb = color.rgb;
+	if (!rgb) return (text) => color.fg(text);
+
+	const shimmer = deriveShimmerColor(rgb);
+	const mode = ctx.ui.theme.getColorMode();
+	return (text, opacity) => {
+		const mixed = mixColors(rgb, shimmer, Math.max(0, Math.min(1, opacity)));
+		return `${formatAnsiForeground(mixed, mode)}${text}${ANSI_RESET_FG}`;
+	};
 }
 
 function parseAnsiForeground(ansi: string): RgbColor | undefined {
@@ -731,6 +749,7 @@ function buildClaudeIndicator(
 	palette: IndicatorPalette,
 	colorMode: ThemeColorMode,
 	stalled = false,
+	toolUse = false,
 	now = Date.now(),
 ): WorkingIndicatorOptions {
 	const characters = getDefaultCharacters();
@@ -750,11 +769,19 @@ function buildClaudeIndicator(
 			} else {
 				spinner = palette.spinner(spinnerFrame);
 			}
-			const renderedMessage = stalled
-				? palette.stall(message)
-				: buildGlimmerMessage(message, frameIndex, palette, requesting);
-			// Prefix in dim, thinking text in independent gray breathing shimmer
 			const frameTime = now + index * intervalMs;
+			let renderedMessage: string;
+			if (stalled) {
+				renderedMessage = palette.stall(message);
+			} else if (toolUse) {
+				// While a tool runs, pulse the whole message on a 2s sine wave
+				// between base and shimmer instead of sweeping the glimmer window.
+				const flashOpacity = (Math.sin((frameTime / 1000) * Math.PI) + 1) / 2;
+				renderedMessage = palette.messageFlash(message, flashOpacity);
+			} else {
+				renderedMessage = buildGlimmerMessage(message, frameIndex, palette, requesting);
+			}
+			// Prefix in dim, thinking text in independent gray breathing shimmer
 			const thinkingColor =
 				thinkingText && thinking.kind === "active"
 					? computeThinkingColorAnsi(thinking, frameTime, colorMode, palette.thinking)
@@ -876,6 +903,10 @@ function refreshClaudeIndicator(ctx: ExtensionContext, runtime: RuntimeStatus, t
 	const intervalMs = getGlimmerIntervalMs(runtime.requesting);
 	const phaseOffset = Math.floor((now - runtime.startedAt) / intervalMs);
 	const stallIntensity = computeStallIntensity(runtime, now);
+	// Tool execution maps to Claude Code's tool-use mode: whole-message flash.
+	// Stall and tool-use are mutually exclusive (stall is forced to 0 while
+	// tools run), but stall takes priority inside buildClaudeIndicator anyway.
+	const toolUse = stallIntensity <= 0 && runtime.activeTools > 0;
 	const { prefixParts, thinking } = buildStatusParts(runtime, thinkingLevel, now);
 	ctx.ui.setWorkingIndicator(
 		buildClaudeIndicator(
@@ -888,6 +919,7 @@ function refreshClaudeIndicator(ctx: ExtensionContext, runtime: RuntimeStatus, t
 			getIndicatorPalette(ctx, INDICATOR_COLOR!, stallIntensity),
 			ctx.ui.theme.getColorMode(),
 			stallIntensity > 0,
+			toolUse,
 			now,
 		),
 	);
