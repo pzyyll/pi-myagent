@@ -368,6 +368,7 @@ interface IndicatorPalette {
 	message(text: string): string;
 	messageShimmer(text: string): string;
 	messageFlash(text: string, opacity: number): string;
+	ramp(text: string, progress: number, opacity: number): string;
 	status(text: string): string;
 	stall(text: string): string;
 	thinking: { base: RgbColor; shimmer: RgbColor };
@@ -383,6 +384,7 @@ function getIndicatorPalette(ctx: ExtensionContext, color: ResolvedColor, stallI
 	const primary = color.fg;
 	const shimmer = getDerivedThemeShimmer(ctx, color);
 	const flash = getFlashRenderer(ctx, color);
+	const ramp = getRampRenderer(ctx, color);
 	const stall = getStallRenderer(ctx, color, stallIntensity);
 
 	const thinkingColors = getThinkingShimmerColors(ctx, THINKING_SHIMMER_COLOR!);
@@ -393,6 +395,7 @@ function getIndicatorPalette(ctx: ExtensionContext, color: ResolvedColor, stallI
 		message: primary,
 		messageShimmer: shimmer,
 		messageFlash: flash,
+		ramp,
 		status: (text) => ctx.ui.theme.fg("dim", text),
 		stall,
 		thinking: thinkingColors,
@@ -432,6 +435,27 @@ function getFlashRenderer(ctx: ExtensionContext, color: ResolvedColor): (text: s
 	const mode = ctx.ui.theme.getColorMode();
 	return (text, opacity) => {
 		const mixed = mixColors(rgb, shimmer, Math.max(0, Math.min(1, opacity)));
+		return `${formatAnsiForeground(mixed, mode)}${text}${ANSI_RESET_FG}`;
+	};
+}
+
+// Long-think ramp: the breathing centre drifts from the base colour toward the
+// derived shimmer by `progress` (0 = base, 1 = shimmer), and each breath pulses
+// between that centre and a slightly lighter version of it via `opacity`.  Used
+// for spinner + message once a think passes THINKING_STILL_MS.
+function getRampRenderer(
+	ctx: ExtensionContext,
+	color: ResolvedColor,
+): (text: string, progress: number, opacity: number) => string {
+	const rgb = color.rgb;
+	if (!rgb) return (text) => color.fg(text);
+
+	const shimmer = deriveShimmerColor(rgb);
+	const mode = ctx.ui.theme.getColorMode();
+	return (text, progress, opacity) => {
+		const center = mixColors(rgb, shimmer, Math.max(0, Math.min(1, progress)));
+		const glow = lightenColor(center, THINKING_GLOW_LIGHTNESS_BOOST);
+		const mixed = mixColors(center, glow, Math.max(0, Math.min(1, opacity)));
 		return `${formatAnsiForeground(mixed, mode)}${text}${ANSI_RESET_FG}`;
 	};
 }
@@ -774,18 +798,38 @@ function buildClaudeIndicator(
 		frames: Array.from({ length: frameCount }, (_, index) => {
 			const frameIndex = index + phaseOffset;
 			const spinnerFrame = spinnerFrames[frameIndex % spinnerFrames.length]!;
+			const frameTime = now + index * intervalMs;
+
+			// Long-think phase 2: from STILL onward, spinner+message drift their
+			// colour from base toward shimmer, reaching full shimmer at
+			// THINKING_RAMP_MS (in sync with the thinking text) with the same 2s
+			// breathing glow. Before STILL it stays the normal glimmer sweep.
+			const thinkingElapsed = thinking.kind === "active" ? frameTime - thinking.startedAt : -1;
+			const inRamp = !stalled && !toolUse && thinkingElapsed >= THINKING_STILL_MS;
+			const rampProgress = inRamp
+				? Math.max(
+						0,
+						Math.min(1, (thinkingElapsed - THINKING_STILL_MS) / Math.max(1, THINKING_RAMP_MS - THINKING_STILL_MS)),
+					)
+				: 0;
+			const rampBreath = inRamp ? (Math.sin((thinkingElapsed / THINKING_GLOW_PERIOD_MS) * Math.PI * 2) + 1) / 2 : 0;
+
 			let spinner: string;
 			if (stalled) {
 				spinner = palette.stall(spinnerFrame);
+			} else if (inRamp) {
+				spinner = palette.ramp(spinnerFrame, rampProgress, rampBreath);
 			} else if (frameIndex % 4 === 0) {
 				spinner = palette.spinnerShimmer(spinnerFrame);
 			} else {
 				spinner = palette.spinner(spinnerFrame);
 			}
-			const frameTime = now + index * intervalMs;
+
 			let renderedMessage: string;
 			if (stalled) {
 				renderedMessage = palette.stall(message);
+			} else if (inRamp) {
+				renderedMessage = palette.ramp(message, rampProgress, rampBreath);
 			} else if (toolUse) {
 				// While a tool runs, pulse the whole message on a 2s sine wave
 				// between base and shimmer instead of sweeping the glimmer window.
