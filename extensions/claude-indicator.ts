@@ -19,8 +19,9 @@ interface ResolvedColor {
 	fg(text: string): string;
 }
 
-function resolveColor(ctx: ExtensionContext, raw: string): ResolvedColor {
-	const hex = parseHexColor(raw);
+function resolveColor(ctx: ExtensionContext, raw: string, fallback = DEFAULT_INDICATOR_COLOR): ResolvedColor {
+	const normalized = raw.trim() || fallback;
+	const hex = parseHexColor(normalized);
 	if (hex) {
 		const mode = ctx.ui.theme.getColorMode();
 		return {
@@ -30,8 +31,15 @@ function resolveColor(ctx: ExtensionContext, raw: string): ResolvedColor {
 	}
 
 	// Theme colour name
-	const name = raw as ThemeColorName;
-	const rgb = parseAnsiForeground(ctx.ui.theme.getFgAnsi(name));
+	const name = normalized as ThemeColorName;
+	let ansi: string;
+	try {
+		ansi = ctx.ui.theme.getFgAnsi(name);
+	} catch {
+		if (normalized !== fallback) return resolveColor(ctx, fallback);
+		return resolveColor(ctx, DEFAULT_INDICATOR_COLOR);
+	}
+	const rgb = parseAnsiForeground(ansi);
 	return {
 		rgb,
 		fg: (text) => ctx.ui.theme.fg(name, text),
@@ -56,9 +64,9 @@ function parseHexColor(raw: string): RgbColor | undefined {
 	};
 }
 
-function loadClaudeIndicatorSetting(key: string, fallback: string): string {
+function loadClaudeIndicatorSetting(cwd: string, key: string, fallback: string): string {
 	const globalPath = join(homedir(), ".pi", "agent", "settings.json");
-	const projectPath = join(process.cwd(), ".pi", "settings.json");
+	const projectPath = join(cwd, ".pi", "settings.json");
 
 	// Project settings override global
 	for (const path of [projectPath, globalPath]) {
@@ -68,7 +76,7 @@ function loadClaudeIndicatorSetting(key: string, fallback: string): string {
 			const section = settings.claudeIndicator;
 			if (typeof section === "object" && section !== null) {
 				const value = (section as Record<string, unknown>)[key];
-				if (typeof value === "string") return value;
+				if (typeof value === "string" && value.trim()) return value.trim();
 			}
 		} catch {
 			// File missing or unparseable — try next
@@ -641,16 +649,14 @@ function buildClaudeIndicator(
 					? computeThinkingColorAnsi(thinking, frameTime, colorMode, palette.thinking)
 					: undefined;
 			const statusParts = prefixParts.map((part) => palette.status(part));
-			if (thinkingText) {
-				statusParts.push(
-					thinkingColor ? `${thinkingColor}${thinkingText}${ANSI_RESET_FG}` : palette.status(thinkingText),
-				);
-			}
 			const status = statusParts.length
 				? ` ${palette.status("(")}${statusParts.join(palette.status(" · "))}${palette.status(")")}`
 				: "";
+			const thinkingPart = thinkingText
+				? ` ${palette.status("·")} ${thinkingColor ? `${thinkingColor}${thinkingText}${ANSI_RESET_FG}` : palette.status(thinkingText)}`
+				: "";
 
-			return `${spinner} ${renderedMessage}${status}`;
+			return `${spinner} ${renderedMessage}${status}${thinkingPart}`;
 		}),
 		intervalMs,
 	};
@@ -819,9 +825,13 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", (_event, ctx) => {
-		const indicatorRaw = loadClaudeIndicatorSetting("defaultColor", DEFAULT_INDICATOR_COLOR);
+		const indicatorRaw = loadClaudeIndicatorSetting(ctx.cwd, "defaultColor", DEFAULT_INDICATOR_COLOR);
 		INDICATOR_COLOR = resolveColor(ctx, indicatorRaw);
-		THINKING_SHIMMER_COLOR = resolveColor(ctx, loadClaudeIndicatorSetting("thinkingShimmerColor", indicatorRaw));
+		THINKING_SHIMMER_COLOR = resolveColor(
+			ctx,
+			loadClaudeIndicatorSetting(ctx.cwd, "thinkingShimmerColor", indicatorRaw),
+			indicatorRaw,
+		);
 		if (mode === CLAUDE_MODE) runtime = applyRandomClaudeMessage(ctx, currentThinkingLevel());
 	});
 
