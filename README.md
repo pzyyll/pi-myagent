@@ -19,17 +19,19 @@ Use `/claude-indicator refresh` to pick a new verb, or `/claude-indicator reset`
 		"defaultColor": "accent",
 		"thinkingShimmerColor": "warning",
 		"shimmerHueShift": 0,
-		"shimmerLightnessBoost": 0.36
+		"shimmerLightnessBoost": 0.36,
+		"flashHueShift": 30
 	}
 }
 ```
 
-| Key                     | Type   | Default     | Description                                                                                                     |
-| ----------------------- | ------ | ----------- | --------------------------------------------------------------------------------------------------------------- |
-| `defaultColor`          | string | `"accent"`  | Spinner/message colour. A theme colour name (e.g. `accent`, `warning`) or a hex literal (`#rrggbb` / `#rgb`).   |
-| `thinkingShimmerColor`  | string | `"warning"` | Target colour the breathing "thinking" text ramps toward. Theme name or hex, same as above.                     |
-| `shimmerHueShift`       | number | `0`         | Degrees to rotate the shimmer hue around the colour wheel (`0`/`360` = same colour, `180` = complementary).     |
-| `shimmerLightnessBoost` | number | `0.36`      | Fraction (`0`–`1`) to lift the shimmer's lightness after the hue rotation; `0` = pure hue shift, no extra glow. |
+| Key                     | Type   | Default     | Description                                                                                                                                                                          |
+| ----------------------- | ------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `defaultColor`          | string | `"accent"`  | Spinner/message colour. A theme colour name (e.g. `accent`, `warning`) or a hex literal (`#rrggbb` / `#rgb`).                                                                        |
+| `thinkingShimmerColor`  | string | `"warning"` | Target colour the breathing "thinking" text ramps toward. Theme name or hex, same as above.                                                                                          |
+| `shimmerHueShift`       | number | `0`         | Degrees to rotate the glimmer-sweep shimmer hue around the colour wheel (`0`/`360` = same colour, `180` = complementary).                                                            |
+| `shimmerLightnessBoost` | number | `0.36`      | Fraction (`0`–`1`) to lift the shimmer's lightness after the hue rotation; `0` = pure hue shift, no extra glow.                                                                      |
+| `flashHueShift`         | number | `30`        | Degrees to rotate the hue of the tool-use flash's end colour, independent of `shimmerHueShift`; keeps the pulse visible on hues (e.g. blue) where a lightness-only shift looks flat. |
 
 Invalid or missing values fall back to the defaults above.
 

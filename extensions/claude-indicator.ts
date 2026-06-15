@@ -18,6 +18,7 @@ const SETTING_DEFAULT_COLOR = "defaultColor";
 const SETTING_THINKING_SHIMMER_COLOR = "thinkingShimmerColor";
 const SETTING_SHIMMER_HUE_SHIFT = "shimmerHueShift";
 const SETTING_SHIMMER_LIGHTNESS_BOOST = "shimmerLightnessBoost";
+const SETTING_FLASH_HUE_SHIFT = "flashHueShift";
 
 // ---------------------------------------------------------------------------
 // Resolved color: decouples colour consumers from the source (theme name or
@@ -130,11 +131,16 @@ let THINKING_SHIMMER_COLOR: ResolvedColor | undefined = {
 const SHIMMER_CHANNEL_BOOST = 30;
 // Shimmer is derived by rotating the base colour's hue around the colour wheel
 // by this many degrees (0/360 = same colour, 180 = complementary).
-const DEFAULT_SHIMMER_HUE_SHIFT = 0;
+const DEFAULT_SHIMMER_HUE_SHIFT = 10;
 let SHIMMER_HUE_SHIFT = DEFAULT_SHIMMER_HUE_SHIFT;
+// The tool-use flash derives its end colour with an independent hue rotation, so
+// the breathing pulse can stay visible (e.g. on blue, where a lightness-only
+// shift reads as flat) without disturbing the regular glimmer's SHIMMER_HUE_SHIFT.
+const DEFAULT_FLASH_HUE_SHIFT = 30;
+let FLASH_HUE_SHIFT = DEFAULT_FLASH_HUE_SHIFT;
 // After rotating hue, lift the shimmer's lightness by this fraction (0-1) for a
 // glow on top of the colour shift; 0 = pure hue rotation, no extra brightness.
-const DEFAULT_SHIMMER_LIGHTNESS_BOOST = 0.36;
+const DEFAULT_SHIMMER_LIGHTNESS_BOOST = 0.3;
 let SHIMMER_LIGHTNESS_BOOST = DEFAULT_SHIMMER_LIGHTNESS_BOOST;
 const ANSI_256_CUBE_VALUES = [0, 95, 135, 175, 215, 255] as const;
 const ANSI_256_GRAY_VALUES = Array.from({ length: 24 }, (_, index) => 8 + index * 10);
@@ -442,11 +448,13 @@ function getDerivedThemeShimmer(ctx: ExtensionContext, color: ResolvedColor): (t
 // Tool-use flash: the whole message pulses between the base colour and the
 // derived shimmer colour by `opacity` (0 = base, 1 = shimmer), instead of the
 // sweeping glimmer window.  Mirrors Claude Code's tool-use GlimmerMessage path.
+// Uses FLASH_HUE_SHIFT (independent of the glimmer's SHIMMER_HUE_SHIFT) so the
+// pulse stays visible even on hues where a lightness-only shift looks flat.
 function getFlashRenderer(ctx: ExtensionContext, color: ResolvedColor): (text: string, opacity: number) => string {
 	const rgb = color.rgb;
 	if (!rgb) return (text) => color.fg(text);
 
-	const shimmer = deriveShimmerColor(rgb);
+	const shimmer = deriveShimmerColor(rgb, FLASH_HUE_SHIFT);
 	const mode = ctx.ui.theme.getColorMode();
 	return (text, opacity) => {
 		const mixed = mixColors(rgb, shimmer, Math.max(0, Math.min(1, opacity)));
@@ -564,7 +572,7 @@ function hslToRgb({ h, s, l }: { h: number; s: number; l: number }): RgbColor {
 	};
 }
 
-function deriveShimmerColor(color: RgbColor): RgbColor {
+function deriveShimmerColor(color: RgbColor, hueShift = SHIMMER_HUE_SHIFT): RgbColor {
 	const { h, s, l } = rgbToHsl(color);
 
 	// Grays / near-white have no meaningful hue to rotate, so fall back to a
@@ -582,7 +590,7 @@ function deriveShimmerColor(color: RgbColor): RgbColor {
 
 	// Rotate hue around the wheel (0/360 = same colour), then lift lightness so
 	// the shimmer both shifts colour and glows.
-	const rotated = (((h + SHIMMER_HUE_SHIFT) % 360) + 360) % 360;
+	const rotated = (((h + hueShift) % 360) + 360) % 360;
 	const lit = Math.max(0, Math.min(1, l + SHIMMER_LIGHTNESS_BOOST));
 	return hslToRgb({ h: rotated, s, l: lit });
 }
@@ -1254,6 +1262,7 @@ export default function (pi: ExtensionAPI) {
 			DEFAULT_THINKING_SHIMMER_COLOR,
 		);
 		SHIMMER_HUE_SHIFT = loadClaudeIndicatorNumber(ctx.cwd, SETTING_SHIMMER_HUE_SHIFT, DEFAULT_SHIMMER_HUE_SHIFT);
+		FLASH_HUE_SHIFT = loadClaudeIndicatorNumber(ctx.cwd, SETTING_FLASH_HUE_SHIFT, DEFAULT_FLASH_HUE_SHIFT);
 		SHIMMER_LIGHTNESS_BOOST = loadClaudeIndicatorNumber(
 			ctx.cwd,
 			SETTING_SHIMMER_LIGHTNESS_BOOST,
