@@ -123,11 +123,11 @@ let THINKING_SHIMMER_COLOR: ResolvedColor | undefined = {
 const SHIMMER_CHANNEL_BOOST = 30;
 // Shimmer is derived by rotating the base colour's hue around the colour wheel
 // by this many degrees (0/360 = same colour, 180 = complementary).
-const DEFAULT_SHIMMER_HUE_SHIFT = 30;
+const DEFAULT_SHIMMER_HUE_SHIFT = 0;
 let SHIMMER_HUE_SHIFT = DEFAULT_SHIMMER_HUE_SHIFT;
 // After rotating hue, lift the shimmer's lightness by this fraction (0-1) for a
 // glow on top of the colour shift; 0 = pure hue rotation, no extra brightness.
-const DEFAULT_SHIMMER_LIGHTNESS_BOOST = 0.1;
+const DEFAULT_SHIMMER_LIGHTNESS_BOOST = 0.36;
 let SHIMMER_LIGHTNESS_BOOST = DEFAULT_SHIMMER_LIGHTNESS_BOOST;
 const ANSI_256_CUBE_VALUES = [0, 95, 135, 175, 215, 255] as const;
 const ANSI_256_GRAY_VALUES = Array.from({ length: 24 }, (_, index) => 8 + index * 10);
@@ -823,16 +823,20 @@ function buildClaudeIndicator(
 			// Long-think phase 2: from STILL onward, spinner+message drift their
 			// colour from base toward shimmer, reaching full shimmer at
 			// THINKING_RAMP_MS (in sync with the thinking text) with the same 2s
-			// breathing glow. Before STILL it stays the normal glimmer sweep.
-			const thinkingElapsed = thinking.kind === "active" ? frameTime - thinking.startedAt : -1;
-			const inRamp = !stalled && !toolUse && thinkingElapsed >= THINKING_STILL_MS;
+			// breathing glow. Before STILL it stays the normal glimmer sweep. The
+			// STILL gate + ramp progress ride the batch clock (now) so they flip on
+			// the same refresh the label does; only the breath uses the per-frame
+			// clock, so it stays smooth between refreshes.
+			const rampNowElapsed = thinking.kind === "active" ? now - thinking.startedAt : -1;
+			const inRamp = !stalled && !toolUse && rampNowElapsed >= THINKING_STILL_MS;
 			const rampProgress = inRamp
 				? Math.max(
 						0,
-						Math.min(1, (thinkingElapsed - THINKING_STILL_MS) / Math.max(1, THINKING_RAMP_MS - THINKING_STILL_MS)),
+						Math.min(1, (rampNowElapsed - THINKING_STILL_MS) / Math.max(1, THINKING_RAMP_MS - THINKING_STILL_MS)),
 					)
 				: 0;
-			const rampBreath = inRamp ? (Math.sin((thinkingElapsed / THINKING_GLOW_PERIOD_MS) * Math.PI * 2) + 1) / 2 : 0;
+			const breathElapsed = thinking.kind === "active" ? frameTime - thinking.startedAt : 0;
+			const rampBreath = inRamp ? (Math.sin((breathElapsed / THINKING_GLOW_PERIOD_MS) * Math.PI * 2) + 1) / 2 : 0;
 
 			let spinner: string;
 			if (stalled) {
@@ -861,7 +865,7 @@ function buildClaudeIndicator(
 			// Prefix in dim, thinking text in independent gray breathing shimmer
 			const thinkingColor =
 				thinkingText && thinking.kind === "active"
-					? computeThinkingColorAnsi(thinking, frameTime, colorMode, palette.thinking)
+					? computeThinkingColorAnsi(thinking, now, frameTime, colorMode, palette.thinking)
 					: undefined;
 			const statusParts = prefixParts.map((part) => palette.status(part));
 			const status = statusParts.length
@@ -977,22 +981,28 @@ function thinkingRampProgress(elapsed: number): number {
 
 function computeThinkingColorAnsi(
 	thinking: ThinkingState,
+	nowMs: number,
 	frameTimeMs: number,
 	colorMode: ThemeColorMode,
 	colors: { base: RgbColor; shimmer: RgbColor },
 ): string | undefined {
 	if (thinking.kind !== "active") return undefined;
-	const elapsed = frameTimeMs - thinking.startedAt;
-	if (elapsed < 0) return undefined;
-	// Breathing centre drifts from the dim base toward the thinking shimmer colour
-	// as the think runs longer, with a visible step at THINKING_STILL_MS; full
-	// colour lands at THINKING_RAMP_MS.
-	const progress = thinkingRampProgress(elapsed);
+	const rampElapsed = nowMs - thinking.startedAt;
+	if (rampElapsed < 0) return undefined;
+	// Centre colour drifts from the dim base toward the thinking shimmer colour as
+	// the think runs longer, with a visible step at THINKING_STILL_MS (full colour
+	// at THINKING_RAMP_MS). This rides the batch clock (nowMs) — the same clock the
+	// label uses — so the step lands on the exact refresh the label flips on,
+	// rather than on a per-frame time that runs ahead of the label.
+	const progress = thinkingRampProgress(rampElapsed);
 	const center = mixColors(colors.base, colors.shimmer, progress);
 	// Each breath pulses between the centre and a slightly lighter version of it,
-	// so the glow stays on-colour at every point along the ramp.
+	// so the glow stays on-colour at every point along the ramp. Breathing keeps
+	// the per-frame clock so it animates smoothly between refreshes; its phase
+	// offset is imperceptible on a periodic sine.
 	const glow = lightenColor(center, THINKING_GLOW_LIGHTNESS_BOOST);
-	const opacity = (Math.sin((elapsed / THINKING_GLOW_PERIOD_MS) * Math.PI * 2) + 1) / 2;
+	const breathElapsed = Math.max(0, frameTimeMs - thinking.startedAt);
+	const opacity = (Math.sin((breathElapsed / THINKING_GLOW_PERIOD_MS) * Math.PI * 2) + 1) / 2;
 	return formatAnsiForeground(mixColors(center, glow, opacity), colorMode);
 }
 
