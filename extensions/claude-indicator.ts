@@ -4,7 +4,7 @@ type ThemeColorName = Parameters<ExtensionContext["ui"]["theme"]["fg"]>[0];
 type ThemeColorMode = ReturnType<ExtensionContext["ui"]["theme"]["getColorMode"]>;
 
 const ANSI_RESET_FG = "\x1b[39m";
-const INDICATOR_COLOR: ThemeColorName = "accent";
+const INDICATOR_COLOR: ThemeColorName = "border";
 const SHIMMER_CHANNEL_BOOST = 30;
 const ANSI_256_CUBE_VALUES = [0, 95, 135, 175, 215, 255] as const;
 const ANSI_256_GRAY_VALUES = Array.from({ length: 24 }, (_, index) => 8 + index * 10);
