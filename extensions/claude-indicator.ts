@@ -16,9 +16,6 @@ const THINKING_COMPLETED_SHOWN_MS = 2000;
 const INDICATOR_TICK_MS = 1000;
 const INDICATOR_REFRESH_THROTTLE_MS = 1000;
 
-// Thinking shimmer: independent gray breathing glow, per Claude Code
-const THINKING_INACTIVE: RgbColor = { r: 153, g: 153, b: 153 };
-const THINKING_INACTIVE_SHIMMER: RgbColor = { r: 185, g: 185, b: 185 };
 const THINKING_GLOW_PERIOD_MS = 2000;
 const THINKING_GLOW_DELAY_MS = 3000;
 
@@ -246,6 +243,7 @@ interface IndicatorPalette {
 	messageShimmer(text: string): string;
 	status(text: string): string;
 	stall(text: string): string;
+	thinking: { base: RgbColor; shimmer: RgbColor };
 }
 
 interface RgbColor {
@@ -259,6 +257,8 @@ function getIndicatorPalette(ctx: ExtensionContext, stallIntensity = 0): Indicat
 	const shimmer = getDerivedThemeShimmer(ctx, INDICATOR_COLOR);
 	const stall = getStallRenderer(ctx, INDICATOR_COLOR, stallIntensity);
 
+	const thinkingColors = getThinkingShimmerColors(ctx);
+
 	return {
 		spinner: primary,
 		spinnerShimmer: shimmer,
@@ -266,7 +266,18 @@ function getIndicatorPalette(ctx: ExtensionContext, stallIntensity = 0): Indicat
 		messageShimmer: shimmer,
 		status: (text) => ctx.ui.theme.fg("dim", text),
 		stall,
+		thinking: thinkingColors,
 	};
+}
+
+const THINKING_INACTIVE: RgbColor = { r: 153, g: 153, b: 153 };
+const THINKING_INACTIVE_SHIMMER: RgbColor = { r: 185, g: 185, b: 185 };
+
+function getThinkingShimmerColors(ctx: ExtensionContext): { base: RgbColor; shimmer: RgbColor } {
+	const dimAnsi = ctx.ui.theme.getFgAnsi("dim");
+	const baseRgb = parseAnsiForeground(dimAnsi);
+	if (!baseRgb) return { base: THINKING_INACTIVE, shimmer: THINKING_INACTIVE_SHIMMER };
+	return { base: baseRgb, shimmer: deriveShimmerColor(baseRgb) };
 }
 
 function getDerivedThemeShimmer(ctx: ExtensionContext, color: ThemeColorName): (text: string) => string {
@@ -545,7 +556,7 @@ function buildClaudeIndicator(
 			const frameTime = now + index * intervalMs;
 			const thinkingColor =
 				thinkingText && thinking.kind === "active"
-					? computeThinkingColorAnsi(thinking, frameTime, colorMode)
+					? computeThinkingColorAnsi(thinking, frameTime, colorMode, palette.thinking)
 					: undefined;
 			const statusParts = prefixParts.map((part) => palette.status(part));
 			if (thinkingText) {
@@ -652,12 +663,13 @@ function computeThinkingColorAnsi(
 	thinking: ThinkingState,
 	frameTimeMs: number,
 	colorMode: ThemeColorMode,
+	colors: { base: RgbColor; shimmer: RgbColor },
 ): string | undefined {
 	if (thinking.kind !== "active") return undefined;
 	const elapsed = frameTimeMs - thinking.startedAt - THINKING_GLOW_DELAY_MS;
 	if (elapsed < 0) return undefined;
 	const opacity = (Math.sin((elapsed / THINKING_GLOW_PERIOD_MS) * Math.PI * 2) + 1) / 2;
-	return formatAnsiForeground(mixColors(THINKING_INACTIVE, THINKING_INACTIVE_SHIMMER, opacity), colorMode);
+	return formatAnsiForeground(mixColors(colors.base, colors.shimmer, opacity), colorMode);
 }
 
 function refreshClaudeIndicator(ctx: ExtensionContext, runtime: RuntimeStatus, thinkingLevel: string): void {
