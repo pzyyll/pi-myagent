@@ -56,7 +56,7 @@ function parseHexColor(raw: string): RgbColor | undefined {
 	};
 }
 
-function loadIndicatorColor(settingKey: string, fallback: string): string {
+function loadClaudeIndicatorSetting(key: string, fallback: string): string {
 	const globalPath = join(homedir(), ".pi", "agent", "settings.json");
 	const projectPath = join(process.cwd(), ".pi", "settings.json");
 
@@ -65,8 +65,11 @@ function loadIndicatorColor(settingKey: string, fallback: string): string {
 		try {
 			const raw = readFileSync(path, "utf-8");
 			const settings = JSON.parse(raw) as Record<string, unknown>;
-			const color = settings[settingKey];
-			if (typeof color === "string") return color;
+			const section = settings.claudeIndicator;
+			if (typeof section === "object" && section !== null) {
+				const value = (section as Record<string, unknown>)[key];
+				if (typeof value === "string") return value;
+			}
 		} catch {
 			// File missing or unparseable — try next
 		}
@@ -816,9 +819,9 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", (_event, ctx) => {
-		const indicatorRaw = loadIndicatorColor("claudeIndicatorColor", DEFAULT_INDICATOR_COLOR);
+		const indicatorRaw = loadClaudeIndicatorSetting("defaultColor", DEFAULT_INDICATOR_COLOR);
 		INDICATOR_COLOR = resolveColor(ctx, indicatorRaw);
-		THINKING_SHIMMER_COLOR = resolveColor(ctx, loadIndicatorColor("claudeThinkingShimmerColor", indicatorRaw));
+		THINKING_SHIMMER_COLOR = resolveColor(ctx, loadClaudeIndicatorSetting("thinkingShimmerColor", indicatorRaw));
 		if (mode === CLAUDE_MODE) runtime = applyRandomClaudeMessage(ctx, currentThinkingLevel());
 	});
 
