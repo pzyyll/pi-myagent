@@ -137,7 +137,13 @@ const INDICATOR_TICK_MS = 1000;
 const INDICATOR_REFRESH_THROTTLE_MS = 1000;
 
 const THINKING_GLOW_PERIOD_MS = 2000;
-const THINKING_GLOW_DELAY_MS = 3000;
+// The breathing centre colour ramps from dim toward the indicator colour across
+// this span, so a longer think reads as "closer to the indicator". Aligned with
+// THINKING_MORE_MS so full colour lands when the text flips to "thinking more".
+const THINKING_RAMP_MS = 20_000;
+// Subtle HSL lightness lift for the bright phase of each breath, applied on top
+// of whatever centre colour the ramp has reached.
+const THINKING_GLOW_LIGHTNESS_BOOST = 0.12;
 
 // Glimmer cadence: use Claude's requesting/responding speeds, and apply the
 // same frame cadence to both spinner shimmer and message shimmer.
@@ -540,6 +546,13 @@ function deriveShimmerColor(color: RgbColor): RgbColor {
 	return hslToRgb({ h: rotated, s, l: lit });
 }
 
+// Lift a colour's lightness by `boost` (0-1) while keeping hue and saturation,
+// so the glow stays the same colour rather than washing toward white.
+function lightenColor(color: RgbColor, boost: number): RgbColor {
+	const { h, s, l } = rgbToHsl(color);
+	return hslToRgb({ h, s, l: Math.max(0, Math.min(1, l + boost)) });
+}
+
 function getLuminance({ r, g, b }: RgbColor): number {
 	const toLinear = (channel: number) => {
 		const value = channel / 255;
@@ -892,10 +905,17 @@ function computeThinkingColorAnsi(
 	colors: { base: RgbColor; shimmer: RgbColor },
 ): string | undefined {
 	if (thinking.kind !== "active") return undefined;
-	const elapsed = frameTimeMs - thinking.startedAt - THINKING_GLOW_DELAY_MS;
+	const elapsed = frameTimeMs - thinking.startedAt;
 	if (elapsed < 0) return undefined;
+	// Breathing centre drifts from the dim base toward the indicator colour as
+	// the think runs longer; full colour lands at THINKING_RAMP_MS.
+	const progress = Math.max(0, Math.min(1, elapsed / THINKING_RAMP_MS));
+	const center = mixColors(colors.base, colors.shimmer, progress);
+	// Each breath pulses between the centre and a slightly lighter version of it,
+	// so the glow stays on-colour at every point along the ramp.
+	const glow = lightenColor(center, THINKING_GLOW_LIGHTNESS_BOOST);
 	const opacity = (Math.sin((elapsed / THINKING_GLOW_PERIOD_MS) * Math.PI * 2) + 1) / 2;
-	return formatAnsiForeground(mixColors(colors.base, colors.shimmer, opacity), colorMode);
+	return formatAnsiForeground(mixColors(center, glow, opacity), colorMode);
 }
 
 function refreshClaudeIndicator(ctx: ExtensionContext, runtime: RuntimeStatus, thinkingLevel: string): void {
