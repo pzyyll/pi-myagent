@@ -7,7 +7,7 @@ type ThemeColorName = Parameters<ExtensionContext["ui"]["theme"]["fg"]>[0];
 type ThemeColorMode = ReturnType<ExtensionContext["ui"]["theme"]["getColorMode"]>;
 
 const ANSI_RESET_FG = "\x1b[39m";
-const DEFAULT_INDICATOR_COLOR = "warning";
+const DEFAULT_INDICATOR_COLOR = "accent";
 
 // ---------------------------------------------------------------------------
 // Resolved color: decouples colour consumers from the source (theme name or
@@ -145,8 +145,6 @@ const THINKING_RAMP_MS = 20_000;
 // of whatever centre colour the ramp has reached.
 const THINKING_GLOW_LIGHTNESS_BOOST = 0.12;
 
-// Glimmer cadence: use Claude's requesting/responding speeds, and apply the
-// same frame cadence to both spinner shimmer and message shimmer.
 const GLIMMER_INTERVAL_REQUESTING_MS = 50;
 const GLIMMER_INTERVAL_RESPONDING_MS = 200;
 
@@ -748,11 +746,21 @@ function buildGlimmerMessage(
 		.join("");
 }
 
-// Claude Code reddens the spinner when output stalls and no tools run; match its
-// ERROR_RED target and the 3s-then-2s-ramp curve from useStalledAnimation.
-const STALL_ERROR_RGB: RgbColor = { r: 171, g: 43, b: 63 };
+// reddens the spinner when output stalls and no tools run; 
+// 3s-then-2s-ramp curve. The stall target is the theme's
+// `error` colour, STALL_ERROR_FALLBACK_RGB fallback when it can't resolve.
+const STALL_ERROR_FALLBACK_RGB: RgbColor = { r: 171, g: 43, b: 63 };
 const STALL_AFTER_MS = 3000;
 const STALL_RAMP_MS = 2000;
+
+function getStallTargetRgb(ctx: ExtensionContext): RgbColor {
+	try {
+		const ansi = ctx.ui.theme.getFgAnsi("error");
+		return parseAnsiForeground(ansi) ?? STALL_ERROR_FALLBACK_RGB;
+	} catch {
+		return STALL_ERROR_FALLBACK_RGB;
+	}
+}
 
 function computeStallIntensity(runtime: RuntimeStatus, now: number): number {
 	if (runtime.activeTools > 0) return 0;
@@ -770,7 +778,7 @@ function getStallRenderer(ctx: ExtensionContext, color: ResolvedColor, intensity
 	}
 
 	const ansi = formatAnsiForeground(
-		mixColors(rgb, STALL_ERROR_RGB, Math.min(intensity, 1)),
+		mixColors(rgb, getStallTargetRgb(ctx), Math.min(intensity, 1)),
 		ctx.ui.theme.getColorMode(),
 	);
 	return (text) => `${ansi}${text}${ANSI_RESET_FG}`;
@@ -1061,7 +1069,7 @@ const PREVIEW_SCENARIOS: PreviewScenario[] = [
 		},
 	},
 	{
-		label: "4. stalled (fades to red after 3s)",
+		label: "4. stalled (fades to error_red after 3s)",
 		build: (wallNow, v) => {
 			const r = previewBaseRuntime(wallNow, "Stalling…", false);
 			// Anchor last progress so stall intensity tracks the virtual clock.
