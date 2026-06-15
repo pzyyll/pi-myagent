@@ -8,23 +8,18 @@ type ThemeColorMode = ReturnType<ExtensionContext["ui"]["theme"]["getColorMode"]
 
 const ANSI_RESET_FG = "\x1b[39m";
 const DEFAULT_INDICATOR_COLOR = "accent";
-// The thinking shimmer's final colour is independent of the indicator colour:
-// the breathing thinking text ramps toward this rather than the spinner colour.
 const DEFAULT_THINKING_SHIMMER_COLOR = "warning";
+const DEFAULT_STALL_COLOR = "error";
 
-// settings.json section + keys this extension reads (see README "Configuration").
+// see README "Configuration".
 const SETTINGS_SECTION = "claudeIndicator";
 const SETTING_DEFAULT_COLOR = "defaultColor";
 const SETTING_THINKING_SHIMMER_COLOR = "thinkingShimmerColor";
 const SETTING_SHIMMER_HUE_SHIFT = "shimmerHueShift";
 const SETTING_SHIMMER_LIGHTNESS_BOOST = "shimmerLightnessBoost";
 const SETTING_FLASH_HUE_SHIFT = "flashHueShift";
+const SETTING_STALL_COLOR = "stallColor";
 
-// ---------------------------------------------------------------------------
-// Resolved color: decouples colour consumers from the source (theme name or
-// hex literal).  Every resolved colour carries an RGB for shimmer/stall
-// derivation and a foreground formatter for simple styled text.
-// ---------------------------------------------------------------------------
 interface ResolvedColor {
 	rgb: RgbColor | undefined;
 	fg(text: string): string;
@@ -128,6 +123,7 @@ let THINKING_SHIMMER_COLOR: ResolvedColor | undefined = {
 	rgb: { r: 185, g: 185, b: 185 },
 	fg: (text) => text,
 };
+let STALL_COLOR: ResolvedColor | undefined;
 const SHIMMER_CHANNEL_BOOST = 30;
 // Shimmer is derived by rotating the base colour's hue around the colour wheel
 // by this many degrees (0/360 = same colour, 180 = complementary).
@@ -774,19 +770,14 @@ function buildGlimmerMessage(
 }
 
 // reddens the spinner when output stalls and no tools run;
-// 3s-then-2s-ramp curve. The stall target is the theme's
-// `error` colour, STALL_ERROR_FALLBACK_RGB fallback when it can't resolve.
+// 3s-then-2s-ramp curve. The stall target is the configured `stallColor`
+// (theme `error` by default), STALL_ERROR_FALLBACK_RGB fallback when it can't resolve.
 const STALL_ERROR_FALLBACK_RGB: RgbColor = { r: 171, g: 43, b: 63 };
 const STALL_AFTER_MS = 3000;
 const STALL_RAMP_MS = 2000;
 
-function getStallTargetRgb(ctx: ExtensionContext): RgbColor {
-	try {
-		const ansi = ctx.ui.theme.getFgAnsi("error");
-		return parseAnsiForeground(ansi) ?? STALL_ERROR_FALLBACK_RGB;
-	} catch {
-		return STALL_ERROR_FALLBACK_RGB;
-	}
+function getStallTargetRgb(): RgbColor {
+	return STALL_COLOR?.rgb ?? STALL_ERROR_FALLBACK_RGB;
 }
 
 function computeStallIntensity(runtime: RuntimeStatus, now: number): number {
@@ -805,7 +796,7 @@ function getStallRenderer(ctx: ExtensionContext, color: ResolvedColor, intensity
 	}
 
 	const ansi = formatAnsiForeground(
-		mixColors(rgb, getStallTargetRgb(ctx), Math.min(intensity, 1)),
+		mixColors(rgb, getStallTargetRgb(), Math.min(intensity, 1)),
 		ctx.ui.theme.getColorMode(),
 	);
 	return (text) => `${ansi}${text}${ANSI_RESET_FG}`;
@@ -1260,6 +1251,11 @@ export default function (pi: ExtensionAPI) {
 			ctx,
 			loadClaudeIndicatorSetting(ctx.cwd, SETTING_THINKING_SHIMMER_COLOR, DEFAULT_THINKING_SHIMMER_COLOR),
 			DEFAULT_THINKING_SHIMMER_COLOR,
+		);
+		STALL_COLOR = resolveColor(
+			ctx,
+			loadClaudeIndicatorSetting(ctx.cwd, SETTING_STALL_COLOR, DEFAULT_STALL_COLOR),
+			DEFAULT_STALL_COLOR,
 		);
 		SHIMMER_HUE_SHIFT = loadClaudeIndicatorNumber(ctx.cwd, SETTING_SHIMMER_HUE_SHIFT, DEFAULT_SHIMMER_HUE_SHIFT);
 		FLASH_HUE_SHIFT = loadClaudeIndicatorNumber(ctx.cwd, SETTING_FLASH_HUE_SHIFT, DEFAULT_FLASH_HUE_SHIFT);
