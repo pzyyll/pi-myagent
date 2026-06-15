@@ -8,6 +8,9 @@ type ThemeColorMode = ReturnType<ExtensionContext["ui"]["theme"]["getColorMode"]
 
 const ANSI_RESET_FG = "\x1b[39m";
 const DEFAULT_INDICATOR_COLOR = "accent";
+// The thinking shimmer's final colour is independent of the indicator colour:
+// the breathing thinking text ramps toward this rather than the spinner colour.
+const DEFAULT_THINKING_SHIMMER_COLOR = "warning";
 
 // ---------------------------------------------------------------------------
 // Resolved color: decouples colour consumers from the source (theme name or
@@ -137,9 +140,9 @@ const INDICATOR_TICK_MS = 1000;
 const INDICATOR_REFRESH_THROTTLE_MS = 1000;
 
 const THINKING_GLOW_PERIOD_MS = 2000;
-// The breathing centre colour ramps from dim toward the indicator colour across
-// this span, so a longer think reads as "closer to the indicator". Aligned with
-// THINKING_MORE_MS so full colour lands when the text flips to "thinking more".
+// The breathing centre colour ramps from dim toward the thinking shimmer colour
+// across this span, so a longer think reads as "closer to that colour". Aligned
+// with THINKING_MORE_MS so full colour lands when the text flips to "thinking more".
 const THINKING_RAMP_MS = 20_000;
 // Subtle HSL lightness lift for the bright phase of each breath, applied on top
 // of whatever centre colour the ramp has reached.
@@ -405,11 +408,11 @@ const THINKING_INACTIVE_SHIMMER: RgbColor = { r: 185, g: 185, b: 185 };
 
 function getThinkingShimmerColors(
 	ctx: ExtensionContext,
-	indicator: ResolvedColor,
+	thinkingShimmer: ResolvedColor,
 ): { base: RgbColor; shimmer: RgbColor } {
 	const dimAnsi = ctx.ui.theme.getFgAnsi("dim");
 	const baseRgb = parseAnsiForeground(dimAnsi) ?? THINKING_INACTIVE;
-	const shimmerRgb = indicator.rgb ?? THINKING_INACTIVE_SHIMMER;
+	const shimmerRgb = thinkingShimmer.rgb ?? THINKING_INACTIVE_SHIMMER;
 	return { base: baseRgb, shimmer: shimmerRgb };
 }
 
@@ -959,8 +962,8 @@ function computeThinkingColorAnsi(
 	if (thinking.kind !== "active") return undefined;
 	const elapsed = frameTimeMs - thinking.startedAt;
 	if (elapsed < 0) return undefined;
-	// Breathing centre drifts from the dim base toward the indicator colour as
-	// the think runs longer; full colour lands at THINKING_RAMP_MS.
+	// Breathing centre drifts from the dim base toward the thinking shimmer colour
+	// as the think runs longer; full colour lands at THINKING_RAMP_MS.
 	const progress = Math.max(0, Math.min(1, elapsed / THINKING_RAMP_MS));
 	const center = mixColors(colors.base, colors.shimmer, progress);
 	// Each breath pulses between the centre and a slightly lighter version of it,
@@ -1207,8 +1210,8 @@ export default function (pi: ExtensionAPI) {
 		INDICATOR_COLOR = resolveColor(ctx, indicatorRaw);
 		THINKING_SHIMMER_COLOR = resolveColor(
 			ctx,
-			loadClaudeIndicatorSetting(ctx.cwd, "thinkingShimmerColor", indicatorRaw),
-			indicatorRaw,
+			loadClaudeIndicatorSetting(ctx.cwd, "thinkingShimmerColor", DEFAULT_THINKING_SHIMMER_COLOR),
+			DEFAULT_THINKING_SHIMMER_COLOR,
 		);
 		SHIMMER_HUE_SHIFT = loadClaudeIndicatorNumber(ctx.cwd, "shimmerHueShift", DEFAULT_SHIMMER_HUE_SHIFT);
 		SHIMMER_LIGHTNESS_BOOST = loadClaudeIndicatorNumber(
