@@ -1,10 +1,84 @@
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, WorkingIndicatorOptions } from "@earendil-works/pi-coding-agent";
 
 type ThemeColorName = Parameters<ExtensionContext["ui"]["theme"]["fg"]>[0];
 type ThemeColorMode = ReturnType<ExtensionContext["ui"]["theme"]["getColorMode"]>;
 
 const ANSI_RESET_FG = "\x1b[39m";
-const INDICATOR_COLOR: ThemeColorName = "border";
+const DEFAULT_INDICATOR_COLOR = "warning";
+
+// ---------------------------------------------------------------------------
+// Resolved color: decouples colour consumers from the source (theme name or
+// hex literal).  Every resolved colour carries an RGB for shimmer/stall
+// derivation and a foreground formatter for simple styled text.
+// ---------------------------------------------------------------------------
+interface ResolvedColor {
+	rgb: RgbColor | undefined;
+	fg(text: string): string;
+}
+
+function resolveColor(ctx: ExtensionContext, raw: string): ResolvedColor {
+	const hex = parseHexColor(raw);
+	if (hex) {
+		const mode = ctx.ui.theme.getColorMode();
+		return {
+			rgb: hex,
+			fg: (text) => `${formatAnsiForeground(hex, mode)}${text}${ANSI_RESET_FG}`,
+		};
+	}
+
+	// Theme colour name
+	const name = raw as ThemeColorName;
+	const rgb = parseAnsiForeground(ctx.ui.theme.getFgAnsi(name));
+	return {
+		rgb,
+		fg: (text) => ctx.ui.theme.fg(name, text),
+	};
+}
+
+function parseHexColor(raw: string): RgbColor | undefined {
+	const m = raw.match(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
+	if (!m) return undefined;
+	const hex = m[1]!;
+	if (hex.length === 3) {
+		return {
+			r: parseInt(hex[0]! + hex[0]!, 16),
+			g: parseInt(hex[1]! + hex[1]!, 16),
+			b: parseInt(hex[2]! + hex[2]!, 16),
+		};
+	}
+	return {
+		r: parseInt(hex.slice(0, 2), 16),
+		g: parseInt(hex.slice(2, 4), 16),
+		b: parseInt(hex.slice(4, 6), 16),
+	};
+}
+
+function loadIndicatorColor(): string {
+	const globalPath = join(homedir(), ".pi", "agent", "settings.json");
+	const projectPath = join(process.cwd(), ".pi", "settings.json");
+
+	// Project settings override global
+	for (const path of [projectPath, globalPath]) {
+		try {
+			const raw = readFileSync(path, "utf-8");
+			const settings = JSON.parse(raw) as Record<string, unknown>;
+			const color = settings.claudeIndicatorColor;
+			if (typeof color === "string") return color;
+		} catch {
+			// File missing or unparseable — try next
+		}
+	}
+
+	return DEFAULT_INDICATOR_COLOR;
+}
+
+let INDICATOR_COLOR: ResolvedColor | undefined = {
+	rgb: { r: 255, g: 200, b: 0 },
+	fg: (text) => text,
+};
 const SHIMMER_CHANNEL_BOOST = 30;
 const ANSI_256_CUBE_VALUES = [0, 95, 135, 175, 215, 255] as const;
 const ANSI_256_GRAY_VALUES = Array.from({ length: 24 }, (_, index) => 8 + index * 10);
@@ -252,10 +326,10 @@ interface RgbColor {
 	b: number;
 }
 
-function getIndicatorPalette(ctx: ExtensionContext, stallIntensity = 0): IndicatorPalette {
-	const primary = (text: string) => ctx.ui.theme.fg(INDICATOR_COLOR, text);
-	const shimmer = getDerivedThemeShimmer(ctx, INDICATOR_COLOR);
-	const stall = getStallRenderer(ctx, INDICATOR_COLOR, stallIntensity);
+function getIndicatorPalette(ctx: ExtensionContext, color: ResolvedColor, stallIntensity = 0): IndicatorPalette {
+	const primary = color.fg;
+	const shimmer = getDerivedThemeShimmer(ctx, color);
+	const stall = getStallRenderer(ctx, color, stallIntensity);
 
 	const thinkingColors = getThinkingShimmerColors(ctx);
 
@@ -280,9 +354,9 @@ function getThinkingShimmerColors(ctx: ExtensionContext): { base: RgbColor; shim
 	return { base: baseRgb, shimmer: deriveShimmerColor(baseRgb) };
 }
 
-function getDerivedThemeShimmer(ctx: ExtensionContext, color: ThemeColorName): (text: string) => string {
-	const rgb = parseAnsiForeground(ctx.ui.theme.getFgAnsi(color));
-	if (!rgb) return (text) => ctx.ui.theme.fg(color, text);
+function getDerivedThemeShimmer(ctx: ExtensionContext, color: ResolvedColor): (text: string) => string {
+	const rgb = color.rgb;
+	if (!rgb) return color.fg;
 
 	const shimmer = deriveShimmerColor(rgb);
 	const ansi = formatAnsiForeground(shimmer, ctx.ui.theme.getColorMode());
@@ -495,7 +569,6 @@ function buildGlimmerMessage(
 const STALL_ERROR_RGB: RgbColor = { r: 171, g: 43, b: 63 };
 const STALL_AFTER_MS = 3000;
 const STALL_RAMP_MS = 2000;
-const STALL_FALLBACK_THRESHOLD = 0.5;
 
 function computeStallIntensity(runtime: RuntimeStatus, now: number): number {
 	if (runtime.activeTools > 0) return 0;
@@ -504,13 +577,12 @@ function computeStallIntensity(runtime: RuntimeStatus, now: number): number {
 	return Math.min((idleMs - STALL_AFTER_MS) / STALL_RAMP_MS, 1);
 }
 
-function getStallRenderer(ctx: ExtensionContext, color: ThemeColorName, intensity: number): (text: string) => string {
-	if (intensity <= 0) return (text) => ctx.ui.theme.fg(color, text);
+function getStallRenderer(ctx: ExtensionContext, color: ResolvedColor, intensity: number): (text: string) => string {
+	if (intensity <= 0) return color.fg;
 
-	const rgb = parseAnsiForeground(ctx.ui.theme.getFgAnsi(color));
+	const rgb = color.rgb;
 	if (!rgb) {
-		const fallback = intensity > STALL_FALLBACK_THRESHOLD ? "error" : color;
-		return (text) => ctx.ui.theme.fg(fallback, text);
+		return color.fg;
 	}
 
 	const ansi = formatAnsiForeground(
@@ -686,7 +758,7 @@ function refreshClaudeIndicator(ctx: ExtensionContext, runtime: RuntimeStatus, t
 			runtime.thinking,
 			runtime.requesting,
 			phaseOffset,
-			getIndicatorPalette(ctx, stallIntensity),
+			getIndicatorPalette(ctx, INDICATOR_COLOR!, stallIntensity),
 			ctx.ui.theme.getColorMode(),
 			stallIntensity > 0,
 			now,
@@ -737,6 +809,7 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", (_event, ctx) => {
+		INDICATOR_COLOR = resolveColor(ctx, loadIndicatorColor());
 		if (mode === CLAUDE_MODE) runtime = applyRandomClaudeMessage(ctx, currentThinkingLevel());
 	});
 
