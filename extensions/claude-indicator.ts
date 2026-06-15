@@ -56,7 +56,7 @@ function parseHexColor(raw: string): RgbColor | undefined {
 	};
 }
 
-function loadIndicatorColor(): string {
+function loadIndicatorColor(settingKey: string, fallback: string): string {
 	const globalPath = join(homedir(), ".pi", "agent", "settings.json");
 	const projectPath = join(process.cwd(), ".pi", "settings.json");
 
@@ -65,18 +65,22 @@ function loadIndicatorColor(): string {
 		try {
 			const raw = readFileSync(path, "utf-8");
 			const settings = JSON.parse(raw) as Record<string, unknown>;
-			const color = settings.claudeIndicatorColor;
+			const color = settings[settingKey];
 			if (typeof color === "string") return color;
 		} catch {
 			// File missing or unparseable — try next
 		}
 	}
 
-	return DEFAULT_INDICATOR_COLOR;
+	return fallback;
 }
 
 let INDICATOR_COLOR: ResolvedColor | undefined = {
 	rgb: { r: 255, g: 200, b: 0 },
+	fg: (text) => text,
+};
+let THINKING_SHIMMER_COLOR: ResolvedColor | undefined = {
+	rgb: { r: 185, g: 185, b: 185 },
 	fg: (text) => text,
 };
 const SHIMMER_CHANNEL_BOOST = 30;
@@ -331,7 +335,7 @@ function getIndicatorPalette(ctx: ExtensionContext, color: ResolvedColor, stallI
 	const shimmer = getDerivedThemeShimmer(ctx, color);
 	const stall = getStallRenderer(ctx, color, stallIntensity);
 
-	const thinkingColors = getThinkingShimmerColors(ctx, color);
+	const thinkingColors = getThinkingShimmerColors(ctx, THINKING_SHIMMER_COLOR!);
 
 	return {
 		spinner: primary,
@@ -812,7 +816,9 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", (_event, ctx) => {
-		INDICATOR_COLOR = resolveColor(ctx, loadIndicatorColor());
+		const indicatorRaw = loadIndicatorColor("claudeIndicatorColor", DEFAULT_INDICATOR_COLOR);
+		INDICATOR_COLOR = resolveColor(ctx, indicatorRaw);
+		THINKING_SHIMMER_COLOR = resolveColor(ctx, loadIndicatorColor("claudeThinkingShimmerColor", indicatorRaw));
 		if (mode === CLAUDE_MODE) runtime = applyRandomClaudeMessage(ctx, currentThinkingLevel());
 	});
 
