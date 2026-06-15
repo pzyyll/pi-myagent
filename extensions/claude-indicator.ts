@@ -86,6 +86,29 @@ function loadClaudeIndicatorSetting(cwd: string, key: string, fallback: string):
 	return fallback;
 }
 
+function loadClaudeIndicatorNumber(cwd: string, key: string, fallback: number): number {
+	const globalPath = join(homedir(), ".pi", "agent", "settings.json");
+	const projectPath = join(cwd, ".pi", "settings.json");
+
+	// Project settings override global
+	for (const path of [projectPath, globalPath]) {
+		try {
+			const raw = readFileSync(path, "utf-8");
+			const settings = JSON.parse(raw) as Record<string, unknown>;
+			const section = settings.claudeIndicator;
+			if (typeof section === "object" && section !== null) {
+				const value = (section as Record<string, unknown>)[key];
+				if (typeof value === "number" && Number.isFinite(value)) return value;
+				if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
+			}
+		} catch {
+			// File missing or unparseable — try next
+		}
+	}
+
+	return fallback;
+}
+
 let INDICATOR_COLOR: ResolvedColor | undefined = {
 	rgb: { r: 255, g: 200, b: 0 },
 	fg: (text) => text,
@@ -95,6 +118,14 @@ let THINKING_SHIMMER_COLOR: ResolvedColor | undefined = {
 	fg: (text) => text,
 };
 const SHIMMER_CHANNEL_BOOST = 30;
+// Shimmer is derived by rotating the base colour's hue around the colour wheel
+// by this many degrees (0/360 = same colour, 180 = complementary).
+const DEFAULT_SHIMMER_HUE_SHIFT = 30;
+let SHIMMER_HUE_SHIFT = DEFAULT_SHIMMER_HUE_SHIFT;
+// After rotating hue, lift the shimmer's lightness by this fraction (0-1) for a
+// glow on top of the colour shift; 0 = pure hue rotation, no extra brightness.
+const DEFAULT_SHIMMER_LIGHTNESS_BOOST = 0.1;
+let SHIMMER_LIGHTNESS_BOOST = DEFAULT_SHIMMER_LIGHTNESS_BOOST;
 const ANSI_256_CUBE_VALUES = [0, 95, 135, 175, 215, 255] as const;
 const ANSI_256_GRAY_VALUES = Array.from({ length: 24 }, (_, index) => 8 + index * 10);
 
@@ -400,15 +431,95 @@ function parseAnsiForeground(ansi: string): RgbColor | undefined {
 	return undefined;
 }
 
-function deriveShimmerColor(color: RgbColor): RgbColor {
-	const nearWhite = getLuminance(color) > 0.85 && Math.min(color.r, color.g, color.b) > 180;
-	if (nearWhite) return mixColors(color, { r: 0, g: 0, b: 0 }, 0.1);
+// RGB (0-255) -> HSL with hue in degrees [0,360) and s/l in [0,1].
+function rgbToHsl({ r, g, b }: RgbColor): { h: number; s: number; l: number } {
+	const rn = r / 255;
+	const gn = g / 255;
+	const bn = b / 255;
+	const max = Math.max(rn, gn, bn);
+	const min = Math.min(rn, gn, bn);
+	const delta = max - min;
+	const l = (max + min) / 2;
+
+	let h = 0;
+	let s = 0;
+	if (delta !== 0) {
+		s = delta / (1 - Math.abs(2 * l - 1));
+		switch (max) {
+			case rn:
+				h = ((gn - bn) / delta) % 6;
+				break;
+			case gn:
+				h = (bn - rn) / delta + 2;
+				break;
+			default:
+				h = (rn - gn) / delta + 4;
+				break;
+		}
+		h *= 60;
+		if (h < 0) h += 360;
+	}
+
+	return { h, s, l };
+}
+
+// HSL (hue in degrees, s/l in [0,1]) -> RGB (0-255).
+function hslToRgb({ h, s, l }: { h: number; s: number; l: number }): RgbColor {
+	const c = (1 - Math.abs(2 * l - 1)) * s;
+	const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+	const m = l - c / 2;
+
+	let r = 0;
+	let g = 0;
+	let b = 0;
+	if (h < 60) {
+		r = c;
+		g = x;
+	} else if (h < 120) {
+		r = x;
+		g = c;
+	} else if (h < 180) {
+		g = c;
+		b = x;
+	} else if (h < 240) {
+		g = x;
+		b = c;
+	} else if (h < 300) {
+		r = x;
+		b = c;
+	} else {
+		r = c;
+		b = x;
+	}
 
 	return {
-		r: clampColor(color.r + SHIMMER_CHANNEL_BOOST),
-		g: clampColor(color.g + SHIMMER_CHANNEL_BOOST),
-		b: clampColor(color.b + SHIMMER_CHANNEL_BOOST),
+		r: clampColor((r + m) * 255),
+		g: clampColor((g + m) * 255),
+		b: clampColor((b + m) * 255),
 	};
+}
+
+function deriveShimmerColor(color: RgbColor): RgbColor {
+	const { h, s, l } = rgbToHsl(color);
+
+	// Grays / near-white have no meaningful hue to rotate, so fall back to a
+	// brightness shift to keep the shimmer visible.
+	if (s < 0.1) {
+		const nearWhite = getLuminance(color) > 0.85 && Math.min(color.r, color.g, color.b) > 180;
+		if (nearWhite) return mixColors(color, { r: 0, g: 0, b: 0 }, 0.1);
+
+		return {
+			r: clampColor(color.r + SHIMMER_CHANNEL_BOOST),
+			g: clampColor(color.g + SHIMMER_CHANNEL_BOOST),
+			b: clampColor(color.b + SHIMMER_CHANNEL_BOOST),
+		};
+	}
+
+	// Rotate hue around the wheel (0/360 = same colour), then lift lightness so
+	// the shimmer both shifts colour and glows.
+	const rotated = (((h + SHIMMER_HUE_SHIFT) % 360) + 360) % 360;
+	const lit = Math.max(0, Math.min(1, l + SHIMMER_LIGHTNESS_BOOST));
+	return hslToRgb({ h: rotated, s, l: lit });
 }
 
 function getLuminance({ r, g, b }: RgbColor): number {
@@ -831,6 +942,12 @@ export default function (pi: ExtensionAPI) {
 			ctx,
 			loadClaudeIndicatorSetting(ctx.cwd, "thinkingShimmerColor", indicatorRaw),
 			indicatorRaw,
+		);
+		SHIMMER_HUE_SHIFT = loadClaudeIndicatorNumber(ctx.cwd, "shimmerHueShift", DEFAULT_SHIMMER_HUE_SHIFT);
+		SHIMMER_LIGHTNESS_BOOST = loadClaudeIndicatorNumber(
+			ctx.cwd,
+			"shimmerLightnessBoost",
+			DEFAULT_SHIMMER_LIGHTNESS_BOOST,
 		);
 		if (mode === CLAUDE_MODE) runtime = applyRandomClaudeMessage(ctx, currentThinkingLevel());
 	});
