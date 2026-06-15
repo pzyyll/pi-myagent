@@ -147,6 +147,13 @@ const THINKING_RAMP_MS = 20_000;
 // Subtle HSL lightness lift for the bright phase of each breath, applied on top
 // of whatever centre colour the ramp has reached.
 const THINKING_GLOW_LIGHTNESS_BOOST = 0.12;
+// The ramp is two linear segments split by a discontinuous step at
+// THINKING_STILL_MS, so the "still thinking" transition reads as a visible
+// colour jump rather than one smooth sweep. The pre-still segment climbs to
+// THINKING_RAMP_PRESTILL_PROGRESS, then snaps up by THINKING_RAMP_STILL_JUMP
+// before climbing the rest of the way to full colour at THINKING_RAMP_MS.
+const THINKING_RAMP_PRESTILL_PROGRESS = 0.2;
+const THINKING_RAMP_STILL_JUMP = 0.35;
 
 const GLIMMER_INTERVAL_REQUESTING_MS = 50;
 const GLIMMER_INTERVAL_RESPONDING_MS = 200;
@@ -751,7 +758,7 @@ function buildGlimmerMessage(
 		.join("");
 }
 
-// reddens the spinner when output stalls and no tools run; 
+// reddens the spinner when output stalls and no tools run;
 // 3s-then-2s-ramp curve. The stall target is the theme's
 // `error` colour, STALL_ERROR_FALLBACK_RGB fallback when it can't resolve.
 const STALL_ERROR_FALLBACK_RGB: RgbColor = { r: 171, g: 43, b: 63 };
@@ -955,6 +962,19 @@ function buildStatusParts(
 	};
 }
 
+// Ramp progress (0 = dim base, 1 = thinking shimmer) for a given elapsed think
+// time. Two linear segments separated by a discontinuous step at
+// THINKING_STILL_MS: the pre-still segment climbs to THINKING_RAMP_PRESTILL_PROGRESS,
+// jumps up by THINKING_RAMP_STILL_JUMP, then climbs to full colour at THINKING_RAMP_MS.
+function thinkingRampProgress(elapsed: number): number {
+	if (elapsed <= 0) return 0;
+	if (elapsed <= THINKING_STILL_MS) return (elapsed / THINKING_STILL_MS) * THINKING_RAMP_PRESTILL_PROGRESS;
+	if (elapsed >= THINKING_RAMP_MS) return 1;
+	const postStill = THINKING_RAMP_PRESTILL_PROGRESS + THINKING_RAMP_STILL_JUMP;
+	const segmentT = (elapsed - THINKING_STILL_MS) / (THINKING_RAMP_MS - THINKING_STILL_MS);
+	return postStill + (1 - postStill) * segmentT;
+}
+
 function computeThinkingColorAnsi(
 	thinking: ThinkingState,
 	frameTimeMs: number,
@@ -965,8 +985,9 @@ function computeThinkingColorAnsi(
 	const elapsed = frameTimeMs - thinking.startedAt;
 	if (elapsed < 0) return undefined;
 	// Breathing centre drifts from the dim base toward the thinking shimmer colour
-	// as the think runs longer; full colour lands at THINKING_RAMP_MS.
-	const progress = Math.max(0, Math.min(1, elapsed / THINKING_RAMP_MS));
+	// as the think runs longer, with a visible step at THINKING_STILL_MS; full
+	// colour lands at THINKING_RAMP_MS.
+	const progress = thinkingRampProgress(elapsed);
 	const center = mixColors(colors.base, colors.shimmer, progress);
 	// Each breath pulses between the centre and a slightly lighter version of it,
 	// so the glow stays on-colour at every point along the ramp.

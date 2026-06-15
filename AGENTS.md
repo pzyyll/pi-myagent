@@ -16,3 +16,7 @@ Here are some commonly used commands:
 - typecheck : `bun run typecheck`
 - code format: `bun run format`
 - run all check: `bun run check`
+
+## Coding Style
+
+- ⚠️Keep comments to a minimum, and only add them where special explanation is needed
