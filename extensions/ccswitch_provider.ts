@@ -15,6 +15,8 @@ const PROVIDER_CONFIG: ProviderConfig = {
 	api: "anthropic-messages",
 	headers: {
 		"User-Agent": "claude-cli/2.1.177 (external, cli)",
+		"anthropic-beta":
+			"claude-code-20250219,context-1m-2025-08-07,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,effort-2025-11-24",
 	},
 	models: [
 		{
@@ -109,6 +111,14 @@ export default function (pi: ExtensionAPI) {
 			metadata: {
 				...existing,
 				user_id: buildUserId(ctx),
+			},
+			context_management: {
+				edits: [
+					{
+						keep: "all",
+						type: "clear_thinking_20251015",
+					},
+				],
 			},
 		};
 	});
