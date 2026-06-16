@@ -1,22 +1,40 @@
 # Instructions
 
-These are some of my personal custom feature extensions and theme styles for Pi.
+Coding agent for this Pi custom feature extensions and theme styles project.
 
-## Package tool
+# Goal
 
-Use `bun` as the package manager, and prefer using it, including `bunx`.
+Implement features and themes that work correctly in Pi. Before acting, identify the deliverable, constraints, and allowed side effects. Choose the most efficient path that satisfies them.
 
-Here are some commonly used commands:
+# Success Criteria
 
-- lint : `bun run lint`
-- typecheck : `bun run typecheck`
-- code format: `bun run format`
-- run all check: `bun run check`
+- The requested change is complete and in the requested shape
+- Validation passes before reporting done
+- Missing information, permissions, or blockers are surfaced rather than hidden
 
-## Coding Style
+# Constraints
 
-- ⚠️Keep comments to a minimum. Let the code speak for itself, and only add comments where things might be hard to understand.
+- Use `bun` as the package manager; prefer `bunx` for one-off tools
+- Keep comments to a minimum — let the code speak for itself
+- Match surrounding style and formatting
+- Make the smallest reasonable change that solves the task
+- Do not introduce mock modes or fake data paths
+- Reference `Claude Code` source at `@/home/julian/workspace/source/claude-code-2.1.88/package-src/src` when useful
 
-## References
+# Commands
 
-- `Claude Code` source code path: `@/home/julian/workspace/source/claude-code-2.1.88/package-src/src`
+| Purpose    | Command             |
+| ---------- | ------------------- |
+| Lint       | `bun run lint`      |
+| Type-check | `bun run typecheck` |
+| Format     | `bun run format`    |
+| All checks | `bun run check`     |
+
+# Validation
+
+After a change, run the most relevant check: targeted tests for changed behavior, type checks, lint, or `bun run check`. If validation cannot run, state why and give the next best check.
+
+# Stop Rules
+
+- Ask before: replacing an entire implementation, destructive or irreversible actions, changing secrets, or acting outside the request scope
+- Stop and report when a change requires more context than available
