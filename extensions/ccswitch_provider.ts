@@ -9,6 +9,18 @@ const TARGET_MODEL_PREFIX = "claude-";
 
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
+const SYSTEM_PREFIX = [
+	{
+		type: "text",
+		text: "x-anthropic-billing-header: cc_version=2.1.177.79a; cc_entrypoint=cli; cch=000000;",
+	},
+	{
+		type: "text",
+		text: "You are Claude Code, Anthropic's official CLI for Claude.",
+		cache_control: { type: "ephemeral" },
+	},
+];
+
 const PROVIDER_CONFIG: ProviderConfig = {
 	baseUrl: "http://127.0.0.1:15721",
 	apiKey: TARGET_PROVIDER,
@@ -106,8 +118,10 @@ export default function (pi: ExtensionAPI) {
 		if (!shouldInject(ctx) || !isPlainObject(event.payload)) return;
 
 		const existing = isPlainObject(event.payload.metadata) ? event.payload.metadata : {};
+		const existingSystem = Array.isArray(event.payload.system) ? event.payload.system : [];
 		return {
 			...event.payload,
+			system: [...SYSTEM_PREFIX, ...existingSystem],
 			metadata: {
 				...existing,
 				user_id: buildUserId(ctx),
