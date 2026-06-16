@@ -16,12 +16,12 @@ Use `/claude-indicator refresh` to pick a new verb, or `/claude-indicator reset`
 ```json
 {
 	"claudeIndicator": {
-		"defaultColor": "accent",
-		"thinkingShimmerColor": "warning",
+		"defaultColor": "accent", // Hex support: #5769F7
+		"thinkingShimmerColor": "warning", // Hex support: #eeff00
 		"shimmerHueShift": 0,
 		"shimmerLightnessBoost": 0.36,
 		"flashHueShift": 30,
-		"stallColor": "error"
+		"stallColor": "error" // Hex support: #ff0000ac
 	}
 }
 ```

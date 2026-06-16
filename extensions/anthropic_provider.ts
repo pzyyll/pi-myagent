@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -6,9 +6,6 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 const TARGET_PROVIDER = "ccswitch";
 const TARGET_MODEL_PREFIX = "claude-";
-
-// One session id per pi process, matching Claude Code's per-session metadata.
-const SESSION_ID = randomUUID();
 
 interface ClaudeIdentity {
 	deviceId: string;
@@ -40,12 +37,12 @@ function resolveIdentity(): ClaudeIdentity {
 	return cachedIdentity;
 }
 
-function buildUserId(): string {
+function buildUserId(ctx: ExtensionContext): string {
 	const { deviceId, accountUuid } = resolveIdentity();
 	return JSON.stringify({
 		device_id: deviceId,
 		account_uuid: accountUuid,
-		session_id: SESSION_ID,
+		session_id: ctx.sessionManager.getSessionId(),
 	});
 }
 
@@ -67,7 +64,7 @@ export default function (pi: ExtensionAPI) {
 			...event.payload,
 			metadata: {
 				...existing,
-				user_id: buildUserId(),
+				user_id: buildUserId(ctx),
 			},
 		};
 	});
