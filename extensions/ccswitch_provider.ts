@@ -26,7 +26,7 @@ const PROVIDER_CONFIG: ProviderConfig = {
 			maxTokens: 128000,
 			thinkingLevelMap: { xhigh: "xhigh" },
 			cost: ZERO_COST,
-			compat: { forceAdaptiveThinking: true },
+			compat: { forceAdaptiveThinking: true, supportsTemperature: false, sendSessionIdHeader: true },
 		},
 		{
 			id: "claude-sonnet-4-6",
@@ -36,7 +36,7 @@ const PROVIDER_CONFIG: ProviderConfig = {
 			contextWindow: 1000000,
 			maxTokens: 64000,
 			cost: ZERO_COST,
-			compat: { forceAdaptiveThinking: true },
+			compat: { forceAdaptiveThinking: true, sendSessionIdHeader: true },
 		},
 		{
 			id: "claude-haiku-4-5-20251001",
@@ -46,6 +46,7 @@ const PROVIDER_CONFIG: ProviderConfig = {
 			contextWindow: 200000,
 			maxTokens: 64000,
 			cost: ZERO_COST,
+			compat: { sendSessionIdHeader: true },
 		},
 	],
 };
