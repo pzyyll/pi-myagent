@@ -20,6 +20,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("before_agent_start", (event) => {
 		const rules = loadRules();
 		if (!rules) return;
-		return { systemPrompt: `${event.systemPrompt}\n\n<readmefirst_instructions>${rules}</readmefirst_instructions>` };
+
+		return { systemPrompt: `${event.systemPrompt}\n\n<!-- > Dev Instructions -->\n\n${rules}\n\n<!-- Dev Instructions -->` };
 	});
 }
