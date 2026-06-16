@@ -2,10 +2,53 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ProviderConfig } from "@earendil-works/pi-coding-agent";
 
 const TARGET_PROVIDER = "ccswitch";
 const TARGET_MODEL_PREFIX = "claude-";
+
+const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+
+const PROVIDER_CONFIG: ProviderConfig = {
+	baseUrl: "http://127.0.0.1:15721",
+	apiKey: TARGET_PROVIDER,
+	api: "anthropic-messages",
+	headers: {
+		"User-Agent": "claude-cli/2.1.177 (external, cli)",
+	},
+	models: [
+		{
+			id: "claude-opus-4-8",
+			name: "claude-opus-4-8",
+			reasoning: true,
+			input: ["text", "image"],
+			contextWindow: 1000000,
+			maxTokens: 128000,
+			thinkingLevelMap: { xhigh: "xhigh" },
+			cost: ZERO_COST,
+			compat: { forceAdaptiveThinking: true },
+		},
+		{
+			id: "claude-sonnet-4-6",
+			name: "claude-sonnet-4-6",
+			reasoning: true,
+			input: ["text", "image"],
+			contextWindow: 1000000,
+			maxTokens: 64000,
+			cost: ZERO_COST,
+			compat: { forceAdaptiveThinking: true },
+		},
+		{
+			id: "claude-haiku-4-5-20251001",
+			name: "claude-haiku-4-5-20251001",
+			reasoning: true,
+			input: ["text", "image"],
+			contextWindow: 200000,
+			maxTokens: 64000,
+			cost: ZERO_COST,
+		},
+	],
+};
 
 interface ClaudeIdentity {
 	deviceId: string;
@@ -68,4 +111,6 @@ export default function (pi: ExtensionAPI) {
 			},
 		};
 	});
+
+	pi.registerProvider(TARGET_PROVIDER, PROVIDER_CONFIG);
 }
