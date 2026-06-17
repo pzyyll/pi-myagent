@@ -21,6 +21,6 @@ export default function (pi: ExtensionAPI) {
 		const rules = loadRules();
 		if (!rules) return;
 
-		return { systemPrompt: `${event.systemPrompt}\n\n<!-- > Dev Instructions -->\n\n${rules}\n\n<!-- Dev Instructions -->` };
+		return { systemPrompt: `${event.systemPrompt}\n\n<!-- > Dev Instructions -->\n${rules}\n<!-- Dev Instructions -->` };
 	});
 }
