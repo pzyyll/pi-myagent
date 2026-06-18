@@ -1,54 +1,42 @@
-# pi-myagent
+# myagent-monorepo
 
-Local pi package for Mr. Julian.
+Mr. Julian's monorepo of [Pi](https://pi.dev) extension and theme packages.
 
-## Included now
+Each subpackage in `packages/` is independently installable via `pi install <path>`.
 
-- `extensions/claude-indicator.ts` — applies a Claude Code-style streaming indicator (`✶ Pouncing…`) with randomized activity verbs.
-- `extensions/responsive-footer.ts` — keeps all third-party footer statuses visible by wrapping them across multiple lines when they exceed terminal width.
+## Packages
 
-Use `/claude-indicator refresh` to pick a new verb, or `/claude-indicator reset` to restore Pi's default working indicator.
+| Package                                                    | Type      | Description                                                                                         |
+| ---------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------- |
+| [`@myagent/ccswitch-provider`](packages/ccswitch-provider) | extension | Wires the local `ccswitch` provider with Claude Code billing headers.                               |
+| [`@myagent/claude-indicator`](packages/claude-indicator)   | extension | Claude Code-style streaming indicator (`✶ Pouncing…`) with randomized verbs and themeable colours.  |
+| [`@myagent/responsive-footer`](packages/responsive-footer) | extension | Wraps third-party footer status segments across multiple lines so they stay visible on narrow TTYs. |
+| [`@myagent/system-prompts`](packages/system-prompts)       | extension | Appends Mr. Julian's developer instructions to the Pi system prompt.                                |
+| [`@myagent/ansi-themes`](packages/ansi-themes)             | theme     | Dark and light themes that follow the terminal's ANSI palette.                                      |
 
-### Configuration
-
-`claude-indicator` reads an optional `claudeIndicator` section from your settings JSON. Project settings (`<cwd>/.pi/settings.json`) override global settings (`~/.pi/agent/settings.json`):
-
-```json
-{
-	"claudeIndicator": {
-		"defaultColor": "accent", // Hex support: #5769F7
-		"thinkingShimmerColor": "warning", // Hex support: #eeff00
-		"shimmerHueShift": 0,
-		"shimmerLightnessBoost": 0.36,
-		"flashHueShift": 30,
-		"stallColor": "error" // Hex support: #ff0000ac
-	}
-}
-```
-
-| Key                     | Type   | Default     | Description                                                                                                                                                                          |
-| ----------------------- | ------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `defaultColor`          | string | `"accent"`  | Spinner/message colour. A theme colour name (e.g. `accent`, `warning`) or a hex literal (`#rrggbb` / `#rgb`).                                                                        |
-| `thinkingShimmerColor`  | string | `"warning"` | Target colour the breathing "thinking" text ramps toward. Theme name or hex, same as above.                                                                                          |
-| `shimmerHueShift`       | number | `0`         | Degrees to rotate the glimmer-sweep shimmer hue around the colour wheel (`0`/`360` = same colour, `180` = complementary).                                                            |
-| `shimmerLightnessBoost` | number | `0.36`      | Fraction (`0`–`1`) to lift the shimmer's lightness after the hue rotation; `0` = pure hue shift, no extra glow.                                                                      |
-| `flashHueShift`         | number | `30`        | Degrees to rotate the hue of the tool-use flash's end colour, independent of `shimmerHueShift`; keeps the pulse visible on hues (e.g. blue) where a lightness-only shift looks flat. |
-| `stallColor`            | string | `"error"`   | Colour the spinner/message fades toward when output stalls (no tools running, ~3s idle). Theme name or hex, same as `defaultColor`.                                                  |
-
-Invalid or missing values fall back to the defaults above.
+See each package's `README.md` for configuration and usage details.
 
 ## Development
 
-Use Bun as the package manager:
+This repo uses [bun workspaces](https://bun.com/docs/install/workspaces) and [mise](https://mise.jdx.dev) for tool versions.
 
 ```bash
-bun install
+mise install            # install pinned node + bun
+bun install             # link workspace packages
 bun run typecheck
 bun run lint
 bun run format:check
-bun run check
+bun run check           # all of the above
 ```
 
-## Themes
+## Local install into Pi
 
-Theme files are intentionally omitted for now. Add JSON themes later under a `themes/` directory and include them in the `pi.themes` manifest when needed.
+Each package is independent:
+
+```bash
+pi install ./packages/ccswitch-provider
+pi install ./packages/claude-indicator
+pi install ./packages/responsive-footer
+pi install ./packages/system-prompts
+pi install ./packages/ansi-themes
+```

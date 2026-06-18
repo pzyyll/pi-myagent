@@ -1,0 +1,23 @@
+{
+	"name": "@myagent/system-prompts",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Appends Mr. Julian's developer instructions to the Pi system prompt.",
+	"keywords": [
+		"pi-package",
+		"pi-extension"
+	],
+	"files": [
+		"src",
+		"rules",
+		"README.md"
+	],
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*"
+	},
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	}
+}
