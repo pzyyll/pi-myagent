@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const RULES_FILE = join(__dirname, "..", "rules", "system-append.gpt55.md");
+const PACKAGE_ROOT = dirname(require.resolve("../package.json"));
+const RULES_FILE = join(PACKAGE_ROOT, "rules", "system-append.gpt55.md");
 
 let cachedRules: string | null | undefined;
 
@@ -21,6 +22,8 @@ export default function (pi: ExtensionAPI) {
 		const rules = loadRules();
 		if (!rules) return;
 
-		return { systemPrompt: `${event.systemPrompt}\n\n<!-- > Dev Instructions -->\n${rules}\n<!-- Dev Instructions -->` };
+		return {
+			systemPrompt: `${event.systemPrompt}\n\n<!-- > Dev Instructions -->\n${rules}\n<!-- Dev Instructions -->`,
+		};
 	});
 }

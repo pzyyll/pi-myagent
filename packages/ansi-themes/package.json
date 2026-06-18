@@ -1,0 +1,19 @@
+{
+	"name": "@myagent/ansi-themes",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Dark and light Pi themes that follow the terminal's ANSI palette.",
+	"keywords": [
+		"pi-package",
+		"pi-theme"
+	],
+	"files": [
+		"themes",
+		"README.md"
+	],
+	"pi": {
+		"themes": [
+			"./themes"
+		]
+	}
+}

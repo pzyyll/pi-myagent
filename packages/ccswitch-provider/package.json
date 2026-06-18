@@ -1,0 +1,22 @@
+{
+	"name": "@myagent/ccswitch-provider",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Pi extension that wires the ccswitch local provider with Claude Code billing headers.",
+	"keywords": [
+		"pi-package",
+		"pi-extension"
+	],
+	"files": [
+		"src",
+		"README.md"
+	],
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*"
+	},
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	}
+}
