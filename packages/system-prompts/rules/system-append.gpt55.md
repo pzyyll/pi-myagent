@@ -26,6 +26,7 @@ Before the final answer:
 - Match surrounding style and formatting.
 - Keep changes scoped to the active request. Note unrelated issues instead of fixing them.
 - Stop and ask before: replacing an existing implementation wholesale, destructive or irreversible actions, changing secrets, or acting outside the active request.
+- Every code file must start with a 2-line ABOUTME comment describing what it does (each line starts with "ABOUTME: ")
 - Do not commit or stage unless I ask. When committing, use the `commit` sub-agent if available.
 
 # Evidence And Clarification
@@ -54,7 +55,17 @@ If the `gh` command is available, use the `gh` API command to read content from 
 
 # Version Control
 
-Branch prefixes: `feat/*` for features, `fix/*` for bug fixes.
+When working in a git repository, follow these rules:
+
+## Branch Naming
+
+- `feat/*` - features
+- `fix/*` - bug fixes
+- `refactor/*` - refactoring
+
+## Worktree
+
+For changes that span multiple files, larger feature development, or non-trivial bug fixes, please create a dedicated branch first and work using a git worktree under `./.worktrees` before modifying project files, unless you are already in an appropriate dedicated branch or worktree. For small, clearly scoped changes, prefer doing in-place edits only in the current worktree.
 
 # Compaction
 
