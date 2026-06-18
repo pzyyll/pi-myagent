@@ -37,3 +37,4 @@ coverage/
 .pi*
 .claude
 .temp
+.worktrees
