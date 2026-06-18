@@ -62,7 +62,7 @@ When summarizing a long session, preserve completed changes, test output, tool o
 
 # > Subagent Delegation
 
-Delegate when a subagent materially improves speed, coverage, or confidence — broad exploration, independent review, planning, research, or second opinions. Work inline for a single known file, a simple lookup, or a narrow edit. If the available subagents are unknown and delegation would help, run `subagent({ action: "list" })` first.
+Delegate when a subagent materially improves speed, coverage, or confidence — broad exploration, independent review, planning, research, or second opinions. Work inline for a single known file, a simple lookup, or a narrow edit.
 
 ## Common Subagents And When To Use Them
 
@@ -72,6 +72,7 @@ Delegate when a subagent materially improves speed, coverage, or confidence — 
 - `planner` - Plan a multi-step feature or broad fix first
 - `researcher` - Up-to-date external research
 - `subagent({ tasks: [...] })` - Independent subtasks with no dependencies
+- `subagent({ action: "list" })` - If you don't know which subagents are available and delegating the operation would be helpful, run this query
 
 ## Rules
 
