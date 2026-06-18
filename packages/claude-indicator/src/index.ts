@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionContext, WorkingIndicatorOptions } from "@earendil-works/pi-coding-agent";
+import {
+	CONFIG_DIR_NAME,
+	type ExtensionAPI,
+	type ExtensionContext,
+	type WorkingIndicatorOptions,
+} from "@earendil-works/pi-coding-agent";
 
 type ThemeColorName = Parameters<ExtensionContext["ui"]["theme"]["fg"]>[0];
 type ThemeColorMode = ReturnType<ExtensionContext["ui"]["theme"]["getColorMode"]>;
@@ -71,8 +76,8 @@ function parseHexColor(raw: string): RgbColor | undefined {
 }
 
 function loadClaudeIndicatorSetting(cwd: string, key: string, fallback: string): string {
-	const globalPath = join(homedir(), ".pi", "agent", "settings.json");
-	const projectPath = join(cwd, ".pi", "settings.json");
+	const globalPath = join(homedir(), CONFIG_DIR_NAME, "agent", "settings.json");
+	const projectPath = join(cwd, CONFIG_DIR_NAME, "settings.json");
 
 	// Project settings override global
 	for (const path of [projectPath, globalPath]) {
@@ -93,8 +98,8 @@ function loadClaudeIndicatorSetting(cwd: string, key: string, fallback: string):
 }
 
 function loadClaudeIndicatorNumber(cwd: string, key: string, fallback: number): number {
-	const globalPath = join(homedir(), ".pi", "agent", "settings.json");
-	const projectPath = join(cwd, ".pi", "settings.json");
+	const globalPath = join(homedir(), CONFIG_DIR_NAME, "agent", "settings.json");
+	const projectPath = join(cwd, CONFIG_DIR_NAME, "settings.json");
 
 	// Project settings override global
 	for (const path of [projectPath, globalPath]) {

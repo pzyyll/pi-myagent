@@ -19,6 +19,7 @@
 		"@earendil-works/pi-coding-agent": "*"
 	},
 	"devDependencies": {
+		"@earendil-works/pi-coding-agent": "0.79.7",
 		"@eslint/js": "^10.0.1",
 		"eslint": "^10.5.0",
 		"eslint-config-prettier": "^10.1.8",
