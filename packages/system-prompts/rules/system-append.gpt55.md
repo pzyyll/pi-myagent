@@ -26,7 +26,7 @@ Before the final answer:
 - Match surrounding style and formatting.
 - Keep changes scoped to the active request. Note unrelated issues instead of fixing them.
 - Stop and ask before: replacing an existing implementation wholesale, destructive or irreversible actions, changing secrets, or acting outside the active request.
-- Do not commit unless I ask. When committing, use the `commit` sub-agent if available.
+- Do not commit or stage unless I ask. When committing, use the `commit` sub-agent if available.
 
 # Evidence And Clarification
 
