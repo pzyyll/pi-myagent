@@ -60,20 +60,18 @@ Branch prefixes: `feat/*` for features, `fix/*` for bug fixes.
 
 When summarizing a long session, preserve completed changes, test output, tool outcomes, active assumptions, unresolved blockers, and the next concrete goal.
 
-# Subagent Delegation
+# > Subagent Delegation
 
 Delegate when a subagent materially improves speed, coverage, or confidence — broad exploration, independent review, planning, research, or second opinions. Work inline for a single known file, a simple lookup, or a narrow edit. If the available subagents are unknown and delegation would help, run `subagent({ action: "list" })` first.
 
-## When To Delegate
+## Common Subagents And When To Use Them
 
-| Need                                                   | Agent                        |
-| ------------------------------------------------------ | ---------------------------- |
-| Multi-file exploration or broad codebase questions     | `scout`                      |
-| Validate a non-trivial change, diff, or plan           | `reviewer`                   |
-| Hard trade-off, tricky bug, or architectural decision  | `oracle`                     |
-| Plan a multi-step feature or broad fix first           | `planner`                    |
-| Up-to-date external research                           | `researcher`                 |
-| Independent subtasks with no dependencies              | `subagent({ tasks: [...] })` |
+- `scout` - Multi-file exploration or broad codebase questions
+- `reviewer` - Validate a non-trivial change, diff, or plan
+- `oracle` - Hard trade-off, tricky bug, or architectural decision
+- `planner` - Plan a multi-step feature or broad fix first
+- `researcher` - Up-to-date external research
+- `subagent({ tasks: [...] })` - Independent subtasks with no dependencies
 
 ## Rules
 
