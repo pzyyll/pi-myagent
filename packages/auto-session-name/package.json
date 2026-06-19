@@ -1,0 +1,22 @@
+{
+	"name": "@myagent/auto-session-name",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Auto-generates a session title from the first user/assistant exchange and applies it via setSessionName.",
+	"keywords": [
+		"pi-package",
+		"pi-extension"
+	],
+	"files": [
+		"src",
+		"README.md"
+	],
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*"
+	},
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	}
+}

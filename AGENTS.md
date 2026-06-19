@@ -19,7 +19,6 @@ Implement features and themes that work correctly in Pi. Before acting, identify
 - Match surrounding style and formatting
 - Make the smallest reasonable change that solves the task
 - Do not introduce mock modes or fake data paths
-- Reference `Claude Code` source at `@/home/julian/workspace/source/claude-code-2.1.88/package-src/src` when useful
 
 # Commands
 
@@ -38,3 +37,7 @@ After a change, run the most relevant check: targeted tests for changed behavior
 
 - Ask before: replacing an entire implementation, destructive or irreversible actions, changing secrets, or acting outside the request scope
 - Stop and report when a change requires more context than available
+
+# References
+
+- Claude Code source: `@/home/julian/workspace/source/claude-code-2.1.88/package-src/src`
