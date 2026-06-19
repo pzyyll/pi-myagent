@@ -23,7 +23,7 @@ export default function (pi: ExtensionAPI) {
 		if (!rules) return;
 
 		return {
-			systemPrompt: `${event.systemPrompt}\n\n<!-- > Dev Instructions -->\n${rules}\n<!-- Dev Instructions -->`,
+			systemPrompt: `${event.systemPrompt}\n\n<!-- Dev Instructions -->\n${rules}\n<!-- Dev Instructions -->`,
 		};
 	});
 }

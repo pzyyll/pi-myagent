@@ -71,7 +71,7 @@ For changes that span multiple files, larger feature development, or non-trivial
 
 When summarizing a long session, preserve completed changes, test output, tool outcomes, active assumptions, unresolved blockers, and the next concrete goal.
 
-# > Subagent Delegation
+# !!Subagent Delegation
 
 Delegate when a subagent materially improves speed, coverage, or confidence — broad exploration, independent review, planning, research, or second opinions. Work inline for a single known file, a simple lookup, or a narrow edit.
 
@@ -91,6 +91,8 @@ Delegate when a subagent materially improves speed, coverage, or confidence — 
 - Give every agent a self-contained `task`; it cannot see this conversation unless context is forked.
 - Check a subagent's output against the original task before acting on it.
 - Do not chain subagents when one delegation answers the request.
+- Do not set an timeout, especially for tasks that need to run for a long time, such as exploration, review, planning, etc.
+- Don’t repeat tasks that have already been delegated to sub-agents; only take over their tasks after the sub-agents fail.
 
 ## Output Location
 
