@@ -17,18 +17,16 @@ the glimmer-sweep, breathing "thinking" ramp, tool-use flash, and stall fade mod
 
 ## Configuration
 
-`claude-indicator` reads an optional `claudeIndicator` section from settings JSON. Project settings (`<cwd>/.pi/settings.json`) override global settings (`~/.pi/agent/settings.json`):
+`claude-indicator` reads optional `~/.pi/agent/@myagent/claude-indicator/config.json`:
 
 ```json
 {
-	"claudeIndicator": {
-		"defaultColor": "accent",
-		"thinkingShimmerColor": "warning",
-		"shimmerHueShift": 10,
-		"shimmerLightnessBoost": 0.3,
-		"flashHueShift": 30,
-		"stallColor": "error"
-	}
+	"defaultColor": "accent",
+	"thinkingShimmerColor": "warning",
+	"shimmerHueShift": 10,
+	"shimmerLightnessBoost": 0.3,
+	"flashHueShift": 30,
+	"stallColor": "error"
 }
 ```
 

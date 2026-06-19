@@ -22,7 +22,7 @@ The title appears in the footer, terminal title bar, and `/resume` selector — 
 
 ## Configuration
 
-Optional `~/.pi/agent/@pi-myagent/auto-session-name/config.json`:
+Optional `~/.pi/agent/@myagent/auto-session-name/config.json`:
 
 ```json
 {
@@ -30,17 +30,17 @@ Optional `~/.pi/agent/@pi-myagent/auto-session-name/config.json`:
 	"maxLength": 40,
 	"style": "concise",
 	"prompt": "...",
-	"model": "openai/gpt-4o-mini"
+	"model": "openai/gpt-5.4-mini"
 }
 ```
 
-| Key         | Type                         | Default     | Notes                                                                                  |
-| ----------- | ---------------------------- | ----------- | -------------------------------------------------------------------------------------- |
-| `enabled`   | `boolean`                    | `true`      | Set `false` to disable auto-naming. `/auto-name` still works.                          |
-| `maxLength` | `number` (1–120)             | `40`        | Soft cap; oversize titles are truncated with `…`.                                      |
-| `style`     | `"concise" \| "descriptive"` | `"concise"` | Picks the built-in prompt template.                                                    |
-| `prompt`    | `string`                     | —           | Full custom prompt. Use `{max}` as a placeholder for `maxLength`.                      |
-| `model`     | `string`                     | —           | `provider/modelId` (e.g. `openai/gpt-4o-mini`). Falls back to active model if missing. |
+| Key         | Type                         | Default     | Notes                                                                                   |
+| ----------- | ---------------------------- | ----------- | --------------------------------------------------------------------------------------- |
+| `enabled`   | `boolean`                    | `true`      | Set `false` to disable auto-naming. `/auto-name` still works.                           |
+| `maxLength` | `number` (1–120)             | `40`        | Soft cap; oversize titles are truncated with `…`.                                       |
+| `style`     | `"concise" \| "descriptive"` | `"concise"` | Picks the built-in prompt template.                                                     |
+| `prompt`    | `string`                     | —           | Full custom prompt. Use `{max}` as a placeholder for `maxLength`.                       |
+| `model`     | `string`                     | —           | `provider/modelId` (e.g. `openai/gpt-5.4-mini`). Falls back to active model if missing. |
 
 ## Notes
 

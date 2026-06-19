@@ -232,7 +232,7 @@ function loadSettings(): AutoNameSettings {
 		style: DEFAULT_STYLE,
 	};
 
-	const configPath = join(homedir(), CONFIG_DIR_NAME, "agent", "@pi-myagent", "auto-session-name", "config.json");
+	const configPath = join(homedir(), CONFIG_DIR_NAME, "agent", "@myagent", "auto-session-name", "config.json");
 
 	const merged: AutoNameSettings = { ...fallback };
 	try {

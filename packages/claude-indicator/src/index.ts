@@ -17,7 +17,6 @@ const DEFAULT_THINKING_SHIMMER_COLOR = "warning";
 const DEFAULT_STALL_COLOR = "error";
 
 // see README "Configuration".
-const SETTINGS_SECTION = "claudeIndicator";
 const SETTING_DEFAULT_COLOR = "defaultColor";
 const SETTING_THINKING_SHIMMER_COLOR = "thinkingShimmerColor";
 const SETTING_SHIMMER_HUE_SHIFT = "shimmerHueShift";
@@ -75,48 +74,28 @@ function parseHexColor(raw: string): RgbColor | undefined {
 	};
 }
 
-function loadClaudeIndicatorSetting(cwd: string, key: string, fallback: string): string {
-	const globalPath = join(homedir(), CONFIG_DIR_NAME, "agent", "settings.json");
-	const projectPath = join(cwd, CONFIG_DIR_NAME, "settings.json");
-
-	// Project settings override global
-	for (const path of [projectPath, globalPath]) {
-		try {
-			const raw = readFileSync(path, "utf-8");
-			const settings = JSON.parse(raw) as Record<string, unknown>;
-			const section = settings[SETTINGS_SECTION];
-			if (typeof section === "object" && section !== null) {
-				const value = (section as Record<string, unknown>)[key];
-				if (typeof value === "string" && value.trim()) return value.trim();
-			}
-		} catch {
-			// File missing or unparseable — try next
-		}
+function loadClaudeIndicatorConfig(): Record<string, unknown> {
+	const configPath = join(homedir(), CONFIG_DIR_NAME, "agent", "@myagent", "claude-indicator", "config.json");
+	try {
+		const raw = readFileSync(configPath, "utf-8");
+		const parsed = JSON.parse(raw);
+		if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
+	} catch {
+		// File missing or unparseable — use defaults.
 	}
+	return {};
+}
 
+function loadClaudeIndicatorSetting(config: Record<string, unknown>, key: string, fallback: string): string {
+	const value = config[key];
+	if (typeof value === "string" && value.trim()) return value.trim();
 	return fallback;
 }
 
-function loadClaudeIndicatorNumber(cwd: string, key: string, fallback: number): number {
-	const globalPath = join(homedir(), CONFIG_DIR_NAME, "agent", "settings.json");
-	const projectPath = join(cwd, CONFIG_DIR_NAME, "settings.json");
-
-	// Project settings override global
-	for (const path of [projectPath, globalPath]) {
-		try {
-			const raw = readFileSync(path, "utf-8");
-			const settings = JSON.parse(raw) as Record<string, unknown>;
-			const section = settings[SETTINGS_SECTION];
-			if (typeof section === "object" && section !== null) {
-				const value = (section as Record<string, unknown>)[key];
-				if (typeof value === "number" && Number.isFinite(value)) return value;
-				if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
-			}
-		} catch {
-			// File missing or unparseable — try next
-		}
-	}
-
+function loadClaudeIndicatorNumber(config: Record<string, unknown>, key: string, fallback: number): number {
+	const value = config[key];
+	if (typeof value === "number" && Number.isFinite(value)) return value;
+	if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
 	return fallback;
 }
 
@@ -1250,22 +1229,23 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", (_event, ctx) => {
-		const indicatorRaw = loadClaudeIndicatorSetting(ctx.cwd, SETTING_DEFAULT_COLOR, DEFAULT_INDICATOR_COLOR);
+		const config = loadClaudeIndicatorConfig();
+		const indicatorRaw = loadClaudeIndicatorSetting(config, SETTING_DEFAULT_COLOR, DEFAULT_INDICATOR_COLOR);
 		INDICATOR_COLOR = resolveColor(ctx, indicatorRaw);
 		THINKING_SHIMMER_COLOR = resolveColor(
 			ctx,
-			loadClaudeIndicatorSetting(ctx.cwd, SETTING_THINKING_SHIMMER_COLOR, DEFAULT_THINKING_SHIMMER_COLOR),
+			loadClaudeIndicatorSetting(config, SETTING_THINKING_SHIMMER_COLOR, DEFAULT_THINKING_SHIMMER_COLOR),
 			DEFAULT_THINKING_SHIMMER_COLOR,
 		);
 		STALL_COLOR = resolveColor(
 			ctx,
-			loadClaudeIndicatorSetting(ctx.cwd, SETTING_STALL_COLOR, DEFAULT_STALL_COLOR),
+			loadClaudeIndicatorSetting(config, SETTING_STALL_COLOR, DEFAULT_STALL_COLOR),
 			DEFAULT_STALL_COLOR,
 		);
-		SHIMMER_HUE_SHIFT = loadClaudeIndicatorNumber(ctx.cwd, SETTING_SHIMMER_HUE_SHIFT, DEFAULT_SHIMMER_HUE_SHIFT);
-		FLASH_HUE_SHIFT = loadClaudeIndicatorNumber(ctx.cwd, SETTING_FLASH_HUE_SHIFT, DEFAULT_FLASH_HUE_SHIFT);
+		SHIMMER_HUE_SHIFT = loadClaudeIndicatorNumber(config, SETTING_SHIMMER_HUE_SHIFT, DEFAULT_SHIMMER_HUE_SHIFT);
+		FLASH_HUE_SHIFT = loadClaudeIndicatorNumber(config, SETTING_FLASH_HUE_SHIFT, DEFAULT_FLASH_HUE_SHIFT);
 		SHIMMER_LIGHTNESS_BOOST = loadClaudeIndicatorNumber(
-			ctx.cwd,
+			config,
 			SETTING_SHIMMER_LIGHTNESS_BOOST,
 			DEFAULT_SHIMMER_LIGHTNESS_BOOST,
 		);
