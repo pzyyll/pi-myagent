@@ -51,9 +51,9 @@
 		"customMessageBg": "canvasOverlay",
 		"customMessageText": "fg",
 		"customMessageLabel": "magenta",
-		"toolPendingBg": "canvasOverlay",
-		"toolSuccessBg": "canvasOverlay",
-		"toolErrorBg": "canvasOverlay",
+		"toolPendingBg": "canvasInset",
+		"toolSuccessBg": "canvasInset",
+		"toolErrorBg": "canvasInset",
 		"toolTitle": "fg",
 		"toolOutput": "fgMuted",
 
