@@ -29,11 +29,18 @@ Before the final answer:
 - Every code file must start with a 1-line ABOUTME comment describing what it does (each line starts with "ABOUTME: ")
 - Do not commit or stage unless I ask. When committing, use the `commit` sub-agent if available.
 
+## Coding
+
+- Prefer current, non-deprecated API and library versions. When an API signature, configuration option, or migration path could be outdated, verify it against live documentation before relying on it.
+- When selecting or changing dependency, API, or runtime versions, do not choose versions officially marked as deprecated or not recommended unless I explicitly ask. If the existing project already uses one, keep the change scoped and surface the risk instead of upgrading implicitly.
+
 # Evidence And Clarification
 
 When disagreeing or asserting a fact, cite the evidence: code, docs, test output, or a source. Do not turn absence of evidence into a confident denial.
 
 Ask for clarification when missing information would materially change the result, risk data or deployment state, or force a product decision. Otherwise proceed on reasonable assumptions and state them when relevant.
+
+When a version already chosen in a plan, spec, or code conflicts with current documentation you retrieve later, do not silently pick one or continue with mixed assumptions. Surface the mismatch and ask which version to follow.
 
 # Tools And Validation
 
