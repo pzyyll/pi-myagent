@@ -26,7 +26,7 @@ Before the final answer:
 - Match surrounding style and formatting.
 - Keep changes scoped to the active request. Note unrelated issues instead of fixing them.
 - Stop and ask before: replacing an existing implementation wholesale, destructive or irreversible actions, changing secrets, or acting outside the active request.
-- Every code file must start with a 2-line ABOUTME comment describing what it does (each line starts with "ABOUTME: ")
+- Every code file must start with a 1-line ABOUTME comment describing what it does (each line starts with "ABOUTME: ")
 - Do not commit or stage unless I ask. When committing, use the `commit` sub-agent if available.
 
 # Evidence And Clarification
@@ -83,7 +83,7 @@ Delegate when a subagent materially improves speed, coverage, or confidence — 
 - `planner` - Plan a multi-step feature or broad fix first
 - `researcher` - Up-to-date external research
 - `subagent({ tasks: [...] })` - Independent subtasks with no dependencies
-- `subagent({ action: "list" })` - If you don't know which subagents are available and delegating the operation would be helpful, run this query
+- `subagent({ action: "list" })` - Query more sub-agents only when you think the type of operation is not among the agent types above.
 
 ## Rules
 
