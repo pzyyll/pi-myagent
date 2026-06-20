@@ -8,6 +8,7 @@
         "@earendil-works/pi-agent-core": "0.79.7",
         "@earendil-works/pi-ai": "0.79.7",
         "@earendil-works/pi-coding-agent": "0.79.7",
+        "@earendil-works/pi-tui": "0.79.7",
         "@eslint/js": "^10.0.1",
         "eslint": "^10.5.0",
         "eslint-config-prettier": "^10.1.8",
@@ -56,6 +57,14 @@
       "version": "0.1.0",
       "peerDependencies": {
         "@earendil-works/pi-coding-agent": "*",
+      },
+    },
+    "packages/tools-manager": {
+      "name": "@myagent/tools-manager",
+      "version": "0.1.0",
+      "peerDependencies": {
+        "@earendil-works/pi-coding-agent": "*",
+        "@earendil-works/pi-tui": "*",
       },
     },
   },
@@ -185,6 +194,8 @@
     "@myagent/responsive-footer": ["@myagent/responsive-footer@workspace:packages/responsive-footer"],
 
     "@myagent/system-prompts": ["@myagent/system-prompts@workspace:packages/system-prompts"],
+
+    "@myagent/tools-manager": ["@myagent/tools-manager@workspace:packages/tools-manager"],
 
     "@nodable/entities": ["@nodable/entities@2.2.0", "", {}, "sha512-9uGyhaQavEUMC8AIddIjau4NsnsXhou+j5sBAGojCM1oxmQpVKTWR/9JxABD6UAv12vpIms55fPZKFQEhG6uBg=="],
 

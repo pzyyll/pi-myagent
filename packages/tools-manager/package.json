@@ -1,0 +1,23 @@
+{
+	"name": "@myagent/tools-manager",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Pi extension that adds a /tools-manager command for interactively enabling and disabling active tools.",
+	"keywords": [
+		"pi-package",
+		"pi-extension"
+	],
+	"files": [
+		"src",
+		"README.md"
+	],
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*"
+	},
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	}
+}
