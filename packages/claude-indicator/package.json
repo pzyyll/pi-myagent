@@ -1,7 +1,7 @@
 {
 	"name": "@myagent/claude-indicator",
 	"version": "0.1.0",
-	"private": true,
+	"private": false,
 	"description": "Claude Code-style streaming indicator for Pi.",
 	"keywords": [
 		"pi-package",

@@ -75,15 +75,13 @@ When summarizing a long session, preserve completed changes, test output, tool o
 
 Delegate when a subagent materially improves speed, coverage, or confidence — broad exploration, independent review, planning, research, or second opinions. Work inline for a single known file, a simple lookup, or a narrow edit.
 
-## Common Subagents And When To Use Them
+## Builtin Subagents And When To Use
 
 - `scout` - Multi-file exploration or broad codebase questions
 - `reviewer` - Validate a non-trivial change, diff, or plan
 - `oracle` - Hard trade-off, tricky bug, or architectural decision
 - `planner` - Plan a multi-step feature or broad fix first
 - `researcher` - Up-to-date external research
-- `subagent({ tasks: [...] })` - Independent subtasks with no dependencies
-- `subagent({ action: "list" })` - Query more sub-agents only when you think the type of operation is not among the agent types above.
 
 ## Rules
 
