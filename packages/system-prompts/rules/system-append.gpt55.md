@@ -52,6 +52,30 @@ For substantial work, send a short user-visible preamble before notable tool pha
 
 For multi-step coding tasks, track what is done, what remains, and any blockers. Continue until the task is complete, blocked by a real constraint, or further action would exceed the requested scope.
 
+## !!Subagent
+
+Delegate when a subagent materially improves speed, coverage, or confidence — broad exploration, independent review, planning, research, or second opinions. Work inline for a single known file, a simple lookup, or a narrow edit.
+
+### Builtin Subagents And When To Use
+
+- `scout` - Broad codebase exploration and multi-file analysis.
+  - **Use when** a question spans files or directories: tracing a feature across modules, finding all implementations/usages of a symbol or pattern, understanding project structure or subsystem boundaries, or answering "how does X work in this codebase".
+  - **Prefer `scout` over repeated grep/read once you need more than ~3 file reads or cross-directory searches to answer one question.**
+  - **Do not use** for a single known file, a one-off lookup, or a simple diff review.
+- `reviewer` - Validate a non-trivial change, diff, or plan
+- `oracle` - Hard trade-off, tricky bug, or architectural decision
+- `planner` - Plan a multi-step feature or broad fix first
+- `researcher` - Up-to-date external research
+
+### Rules
+
+- Each subagent is a real child session with token and time cost. Delegate only when the scope justifies it.
+- Give every agent a self-contained `task`; it cannot see this conversation unless context is forked.
+- Check a subagent's output against the original task before acting on it.
+- Do not chain subagents when one delegation answers the request.
+- Do not set an timeout, especially for tasks that need to run for a long time, such as exploration, review, planning, etc.
+- Don’t repeat tasks that have already been delegated to sub-agents; only take over their tasks after the sub-agents fail.
+
 # Documents
 
 Write generated documents in English unless I ask otherwise. In Chinese documents, keep a single space between English/code and Chinese text.
@@ -77,27 +101,6 @@ For changes that span multiple files, larger feature development, or non-trivial
 # Compaction
 
 When summarizing a long session, preserve completed changes, test output, tool outcomes, active assumptions, unresolved blockers, and the next concrete goal.
-
-# !!Subagent Delegation
-
-Delegate when a subagent materially improves speed, coverage, or confidence — broad exploration, independent review, planning, research, or second opinions. Work inline for a single known file, a simple lookup, or a narrow edit.
-
-## Builtin Subagents And When To Use
-
-- `scout` - Multi-file exploration or broad codebase questions
-- `reviewer` - Validate a non-trivial change, diff, or plan
-- `oracle` - Hard trade-off, tricky bug, or architectural decision
-- `planner` - Plan a multi-step feature or broad fix first
-- `researcher` - Up-to-date external research
-
-## Rules
-
-- Each subagent is a real child session with token and time cost. Delegate only when the scope justifies it.
-- Give every agent a self-contained `task`; it cannot see this conversation unless context is forked.
-- Check a subagent's output against the original task before acting on it.
-- Do not chain subagents when one delegation answers the request.
-- Do not set an timeout, especially for tasks that need to run for a long time, such as exploration, review, planning, etc.
-- Don’t repeat tasks that have already been delegated to sub-agents; only take over their tasks after the sub-agents fail.
 
 ## Output Location
 
