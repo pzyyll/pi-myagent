@@ -32,10 +32,10 @@
 	},
 	"pi": {
 		"themes": [
-			"packages/*/themes"
+			"packages/**/themes"
 		],
 		"extensions": [
-			"packages/*/src"
+			"packages/*"
 		]
 	}
 }

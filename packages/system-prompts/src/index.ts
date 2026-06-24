@@ -14,16 +14,27 @@ function loadRules(): string | null {
 	} catch {
 		cachedRules = null;
 	}
-	return cachedRules;
+	return `<!-- Dev Instructions -->
+${cachedRules}
+<!-- Dev Instructions -->`;
 }
 
 export default function (pi: ExtensionAPI) {
+	const marker = "<project_context>";
+
 	pi.on("before_agent_start", (event) => {
 		const rules = loadRules();
 		if (!rules) return;
 
+		let sp = event.systemPrompt;
+		if (!sp.includes(marker)) {
+			sp += "\n\n" + rules;
+		} else {
+			sp = sp.replace(marker, rules + "\n\n" + marker);
+		}
+
 		return {
-			systemPrompt: `${event.systemPrompt}\n\n<!-- Dev Instructions -->\n${rules}\n<!-- Dev Instructions -->`,
+			systemPrompt: sp,
 		};
 	});
 }
