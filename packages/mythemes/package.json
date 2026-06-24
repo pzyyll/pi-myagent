@@ -8,12 +8,19 @@
 		"pi-theme"
 	],
 	"files": [
+		"src",
 		"themes",
 		"README.md"
 	],
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*"
+	},
 	"pi": {
 		"themes": [
 			"./themes"
+		],
+		"extensions": [
+			"./src/index.ts"
 		]
 	}
 }

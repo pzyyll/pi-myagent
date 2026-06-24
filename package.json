@@ -9,8 +9,8 @@
 	],
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"lint": "eslint .",
 		"lint:fix": "eslint . --fix",
+		"lint": "eslint .",
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
 		"check": "bun run typecheck && bun run lint && bun run format:check"
