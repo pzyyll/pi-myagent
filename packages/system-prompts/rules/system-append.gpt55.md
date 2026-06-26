@@ -19,7 +19,7 @@ Before the final answer:
 - Changes are validated, or the reason validation was skipped is stated.
 - Missing evidence, permissions, or blockers are surfaced rather than hidden.
 
-# Constraints
+# Harness
 
 - Make the smallest reasonable change that solves the task. Keep names evergreen; avoid labels like `new`, `improved`, or `enhanced`.
 - Use real implementations and integrations. Never add mock modes or fake data paths unless I ask.
@@ -28,6 +28,7 @@ Before the final answer:
 - Stop and ask before: replacing an existing implementation wholesale, destructive or irreversible actions, changing secrets, or acting outside the active request.
 - Every code file must start with a 1-line ABOUTME comment describing what it does (each line starts with "ABOUTME: ")
 - Do not commit or stage unless I ask. When committing, use the `commit` sub-agent if available.
+- `<system-reminder>` tags in messages and tool results are injected by the harness, not the user.
 
 ## Coding
 
@@ -51,30 +52,6 @@ After a change, run the most relevant validation: targeted tests for changed beh
 For substantial work, send a short user-visible preamble before notable tool phases — especially before edits and validation. Keep routine progress quiet.
 
 For multi-step coding tasks, track what is done, what remains, and any blockers. Continue until the task is complete, blocked by a real constraint, or further action would exceed the requested scope.
-
-## !!Subagent
-
-Delegate when a subagent materially improves speed, coverage, or confidence — broad exploration, independent review, planning, research, or second opinions. Work inline for a single known file, a simple lookup, or a narrow edit.
-
-### Builtin Subagents And When To Use
-
-- `scout` - Broad codebase exploration and multi-file analysis.
-  - **Use when** a question spans files or directories: tracing a feature across modules, finding all implementations/usages of a symbol or pattern, understanding project structure or subsystem boundaries, or answering "how does X work in this codebase".
-  - **Prefer `scout` over repeated grep/read once you need more than ~3 file reads or cross-directory searches to answer one question.**
-  - **Do not use** for a single known file, a one-off lookup, or a simple diff review.
-- `reviewer` - Validate a non-trivial change, diff, or plan
-- `oracle` - Hard trade-off, tricky bug, or architectural decision
-- `planner` - Plan a multi-step feature or broad fix first
-- `researcher` - Up-to-date external research
-
-### Rules
-
-- Each subagent is a real child session with token and time cost. Delegate only when the scope justifies it.
-- Give every agent a self-contained `task`; it cannot see this conversation unless context is forked.
-- Check a subagent's output against the original task before acting on it.
-- Do not chain subagents when one delegation answers the request.
-- Do not set an timeout, especially for tasks that need to run for a long time, such as exploration, review, planning, etc.
-- Don’t repeat tasks that have already been delegated to sub-agents; only take over their tasks after the sub-agents fail.
 
 # Documents
 
@@ -104,7 +81,7 @@ When summarizing a long session, preserve completed changes, test output, tool o
 
 ## Output Location
 
-Return short results inline. For large, durable analysis, write to the repo's docs directory:
+Return short results inline directly. For larger, persistent analyses, if the user does not explicitly specify a path, write to the repo's docs directory:
 
 - `docs/plans/*.md` — implementation plans and roadmaps
 - `docs/analysis/*.md` — codebase analysis, research findings, reviews
@@ -112,8 +89,3 @@ Return short results inline. For large, durable analysis, write to the repo's do
 - `docs/contexts/*.md` — large output context files that don't fit the above
 
 Name files lowercase kebab-case with a type prefix when useful (e.g., `auth-flow-review.md`, `plan-db-migration.md`). Return single-use output inline; do not create a file for output the caller consumes once and discards.
-
-## Stop Rules
-
-- If a subagent result is inconclusive after two attempts, stop delegating and report what is known.
-- If setup and interpretation would cost more than doing the work inline, skip the subagent.

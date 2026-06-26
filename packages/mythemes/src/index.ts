@@ -4,6 +4,7 @@
 import { CustomEditor, type ExtensionAPI, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
 
+// "❯","»"
 const PROMPT = "»";
 const INDENT = " ";
 const PREFIX_WIDTH = 1;

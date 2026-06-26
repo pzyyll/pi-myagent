@@ -28,14 +28,24 @@
 		"eslint-config-prettier": "^10.1.8",
 		"prettier": "^3.8.4",
 		"typescript": "^6.0.3",
-		"typescript-eslint": "^8.61.0"
+		"typescript-eslint": "^8.61.0",
+		"typebox": "^1.3.0"
 	},
 	"pi": {
 		"themes": [
 			"packages/**/themes"
 		],
+		"prompts": [
+			"packages/**/prompts"
+		],
 		"extensions": [
-			"packages/*"
+			"packages/auto-session-name",
+			"packages/claude-indicator",
+			"packages/system-prompts",
+			"packages/responsive-footer",
+			"packages/tools-manager",
+			"packages/mythemes",
+			"packages/subagent"
 		]
 	}
 }
