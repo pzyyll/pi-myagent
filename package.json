@@ -44,8 +44,7 @@
 			"packages/system-prompts",
 			"packages/responsive-footer",
 			"packages/tools-manager",
-			"packages/mythemes",
-			"packages/subagent"
+			"packages/mythemes"
 		]
 	}
 }

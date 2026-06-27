@@ -26,7 +26,7 @@ Before the final answer:
 - Match surrounding style and formatting.
 - Keep changes scoped to the active request. Note unrelated issues instead of fixing them.
 - Stop and ask before: replacing an existing implementation wholesale, destructive or irreversible actions, changing secrets, or acting outside the active request.
-- Every code file must start with a 1-line ABOUTME comment describing what it does (each line starts with "ABOUTME: ")
+- Every code file must start with a 2-line ABOUTME comment describing what it does (each line starts with "ABOUTME: ")
 - Do not commit or stage unless I ask. When committing, use the `commit` sub-agent if available.
 - `<system-reminder>` tags in messages and tool results are injected by the harness, not the user.
 
@@ -81,7 +81,9 @@ When summarizing a long session, preserve completed changes, test output, tool o
 
 ## Output Location
 
-Return short results inline directly. For larger, persistent analyses, if the user does not explicitly specify a path, write to the repo's docs directory:
+Return short results inline directly. For larger, persistent analyses, if the user does not explicitly specify a path, write to the repo's docs directory, if it's a monorepo project, create it in the corresponding subproject, e.g. "packages/\*\*/docs/".
+
+The typical directory structure is as follows:
 
 - `docs/plans/*.md` — implementation plans and roadmaps
 - `docs/analysis/*.md` — codebase analysis, research findings, reviews
