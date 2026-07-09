@@ -5,6 +5,6 @@ instructions to the Pi system prompt before each agent run.
 
 ## What it does
 
-On `before_agent_start`, reads `rules/system-append.gpt55.md` from the package and appends it to the
+On `before_agent_start`, reads `rules/system-append.gpt56.md` from the package and appends it to the
 incoming system prompt, wrapped in `<!-- > Dev Instructions -->` … `<!-- Dev Instructions -->` markers. The
 rules file is loaded once and cached for the session.

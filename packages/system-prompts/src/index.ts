@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const PACKAGE_ROOT = dirname(require.resolve("../package.json"));
-const RULES_FILE = join(PACKAGE_ROOT, "rules", "system-append.gpt55.md");
+const RULES_FILE = join(PACKAGE_ROOT, "rules", "system-append.gpt56.md");
 
 let cachedRules: string | null | undefined;
 
