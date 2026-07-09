@@ -1,0 +1,23 @@
+{
+	"name": "@myagent/xai-supergrok",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Adds SuperGrok OAuth login support for Pi's built-in xAI provider.",
+	"keywords": [
+		"pi-package",
+		"pi-extension"
+	],
+	"files": [
+		"src",
+		"README.md"
+	],
+	"peerDependencies": {
+		"@earendil-works/pi-ai": "*",
+		"@earendil-works/pi-coding-agent": "*"
+	},
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	}
+}

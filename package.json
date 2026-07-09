@@ -44,7 +44,8 @@
 			"packages/system-prompts",
 			"packages/responsive-footer",
 			"packages/tools-manager",
-			"packages/mythemes"
+			"packages/mythemes",
+			"packages/xai-supergrok"
 		]
 	}
 }
