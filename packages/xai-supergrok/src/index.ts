@@ -1,5 +1,5 @@
 // ABOUTME: Registers SuperGrok device-code OAuth for Pi's built-in xAI provider.
-// ABOUTME: Uses OpenAI Responses models for xAI while preserving API-key fallback.
+// ABOUTME: Uses OpenAI Responses models for xAI with explicit prompt_cache_key sticky routing.
 import { setTimeout as sleep } from "node:timers/promises";
 import { URLSearchParams } from "node:url";
 import type { OAuthCredentials, OAuthLoginCallbacks } from "@earendil-works/pi-ai";
@@ -18,6 +18,8 @@ const DEVICE_CODE_SLOW_DOWN_INCREMENT_MS = 5_000;
 const DEVICE_CODE_DEFAULT_EXPIRES_MS = 5 * 60 * 1000;
 const OAUTH_POLLING_SAFETY_MARGIN_MS = 3_000;
 const ACCESS_TOKEN_REFRESH_SKEW_MS = 120_000;
+// OpenCode/xAI Responses sticky routing uses body prompt_cache_key, not OpenAI session_id / 24h retention.
+const PROMPT_CACHE_KEY_MAX_LENGTH = 64;
 const XAI_RESPONSES_COMPAT = {
 	supportsDeveloperRole: false,
 	sendSessionIdHeader: false,
@@ -306,6 +308,31 @@ async function refreshXaiToken(credentials: OAuthCredentials): Promise<OAuthCred
 	};
 }
 
+function clampPromptCacheKey(key: string | undefined): string | undefined {
+	if (!key) return undefined;
+	const chars = Array.from(key);
+	if (chars.length <= PROMPT_CACHE_KEY_MAX_LENGTH) return key;
+	return chars.slice(0, PROMPT_CACHE_KEY_MAX_LENGTH).join("");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function withXaiPromptCache(payload: unknown, sessionId: string | undefined): unknown {
+	if (!isRecord(payload)) return payload;
+
+	const promptCacheKey = clampPromptCacheKey(sessionId);
+	if (!promptCacheKey) return payload;
+
+	const next: Record<string, unknown> = {
+		...payload,
+		prompt_cache_key: promptCacheKey,
+	};
+	delete next.prompt_cache_retention;
+	return next;
+}
+
 export default function (pi: ExtensionAPI) {
 	pi.registerProvider("xai", {
 		baseUrl: XAI_BASE_URL,
@@ -318,5 +345,10 @@ export default function (pi: ExtensionAPI) {
 			refreshToken: refreshXaiToken,
 			getApiKey: (credentials) => credentials.access,
 		},
+	});
+
+	pi.on("before_provider_request", (event, ctx) => {
+		if (ctx.model?.provider !== "xai") return;
+		return withXaiPromptCache(event.payload, ctx.sessionManager.getSessionId());
 	});
 }
