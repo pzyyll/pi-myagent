@@ -1,3 +1,5 @@
+// ABOUTME: Auto-generates a session title from the first user/assistant exchange.
+// ABOUTME: Applies it via setSessionName, with optional model and fallbackModels.
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +20,7 @@ interface AutoNameSettings {
 	style: NamingStyle;
 	prompt?: string;
 	model?: string;
+	fallbackModels: string[];
 }
 
 const DEFAULT_PROMPTS: Record<NamingStyle, string> = {
@@ -29,7 +32,7 @@ const DEFAULT_PROMPTS: Record<NamingStyle, string> = {
 		"Use the same language as the user. Return ONLY the title, no quotes, no trailing punctuation, no explanation.",
 };
 
-const inflight = new WeakSet<object>();
+let namingInflight = false;
 const triedSessions = new Set<string>();
 
 export default function (pi: ExtensionAPI) {
@@ -115,20 +118,73 @@ function extractText(message: AgentMessage): string {
 	return out.join("\n");
 }
 
-function resolveModel(ctx: ExtensionContext, settings: AutoNameSettings): Model<any> | undefined {
+interface ModelCandidate {
+	/** Display label for notifications (provider/modelId or "active"). */
+	label: string;
+	model: Model<any>;
+}
+
+/** Parse `provider/modelId`; returns undefined if the ref is malformed. */
+function parseModelRef(ref: string): { provider: string; modelId: string } | undefined {
+	const slashIdx = ref.indexOf("/");
+	if (slashIdx <= 0 || slashIdx >= ref.length - 1) return undefined;
+	return { provider: ref.slice(0, slashIdx), modelId: ref.slice(slashIdx + 1) };
+}
+
+function lookupModel(ctx: ExtensionContext, ref: string): Model<any> | undefined {
+	const parsed = parseModelRef(ref);
+	if (!parsed) return undefined;
+	return ctx.modelRegistry.find(parsed.provider, parsed.modelId);
+}
+
+/**
+ * Build the ordered model attempt list:
+ * 1. configured `model` if set and found; else active session model when `model` is unset
+ * 2. each `fallbackModels` entry that resolves
+ * 3. active session model as last resort when a configured primary was missing (legacy behaviour)
+ */
+function collectModelCandidates(
+	ctx: ExtensionContext,
+	settings: AutoNameSettings,
+): { candidates: ModelCandidate[]; unresolved: string[] } {
+	const candidates: ModelCandidate[] = [];
+	const unresolved: string[] = [];
+	const seen = new Set<string>();
+
+	const push = (label: string, model: Model<any> | undefined) => {
+		if (!model) return;
+		const key = `${model.provider}/${model.id}`;
+		if (seen.has(key)) return;
+		seen.add(key);
+		candidates.push({ label, model });
+	};
+
 	if (settings.model) {
-		const slashIdx = settings.model.indexOf("/");
-		if (slashIdx > 0 && slashIdx < settings.model.length - 1) {
-			const provider = settings.model.slice(0, slashIdx);
-			const modelId = settings.model.slice(slashIdx + 1);
-			const customModel = ctx.modelRegistry.find(provider, modelId);
-			if (customModel) return customModel;
-			if (ctx.hasUI) {
-				ctx.ui.notify(`auto-session-name: model "${settings.model}" not found, using active model`, "warning");
-			}
+		const found = lookupModel(ctx, settings.model);
+		if (found) {
+			push(settings.model, found);
+		} else {
+			unresolved.push(settings.model);
+		}
+	} else {
+		push("active", ctx.model);
+	}
+
+	for (const ref of settings.fallbackModels) {
+		const found = lookupModel(ctx, ref);
+		if (found) {
+			push(ref, found);
+		} else {
+			unresolved.push(ref);
 		}
 	}
-	return ctx.model;
+
+	// Prefer configured primary was missing and nothing else resolved → use active (old UX).
+	if (settings.model && candidates.length === 0) {
+		push("active", ctx.model);
+	}
+
+	return { candidates, unresolved };
 }
 
 async function runNaming(
@@ -137,20 +193,16 @@ async function runNaming(
 	settings: AutoNameSettings,
 	conversation: Conversation,
 ): Promise<void> {
-	const model = resolveModel(ctx, settings);
-	if (!model) {
-		if (ctx.hasUI) ctx.ui.notify("auto-session-name: no active model", "warning");
-		return;
-	}
-
-	const guard = model as unknown as object;
-	if (inflight.has(guard)) return;
-	inflight.add(guard);
+	if (namingInflight) return;
+	namingInflight = true;
 
 	try {
-		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-		if (!auth.ok || !auth.apiKey) {
-			if (ctx.hasUI) ctx.ui.notify("auto-session-name: no API key for current model", "warning");
+		const { candidates, unresolved } = collectModelCandidates(ctx, settings);
+		if (candidates.length === 0) {
+			if (ctx.hasUI) {
+				const detail = unresolved.length > 0 ? ` (not found: ${unresolved.join(", ")})` : "";
+				ctx.ui.notify(`auto-session-name: no active model${detail}`, "warning");
+			}
 			return;
 		}
 
@@ -160,37 +212,71 @@ async function runNaming(
 		);
 		const userPayload = [promptTemplate, "", "<conversation>", conversation.combined, "</conversation>"].join("\n");
 
-		const response = await complete(
-			model as Model<never>,
-			{
-				messages: [
-					{
-						role: "user",
-						content: [{ type: "text", text: userPayload }],
-						timestamp: Date.now(),
-					},
-				],
-			},
-			{
-				apiKey: auth.apiKey,
-				headers: auth.headers,
-				signal: ctx.signal,
-			},
-		);
+		const failures: string[] = [];
+		for (const ref of unresolved) {
+			failures.push(`${ref}: not found`);
+		}
 
-		const title = sanitizeTitle(extractAssistantText(response.content), settings.maxLength);
-		if (!title) return;
-		if (pi.getSessionName()) return; // user set one manually while we were thinking
+		for (const { label, model } of candidates) {
+			if (ctx.signal?.aborted) return;
 
-		pi.setSessionName(title);
-	} catch (err) {
-		if (ctx.hasUI) {
-			const reason = err instanceof Error ? err.message : String(err);
-			ctx.ui.notify(`auto-session-name failed: ${reason}`, "warning");
+			try {
+				const title = await nameWithModel(ctx, model, userPayload, settings.maxLength);
+				if (!title) {
+					failures.push(`${label}: empty title`);
+					continue;
+				}
+				if (pi.getSessionName()) return; // user set one manually while we were thinking
+				pi.setSessionName(title);
+				return;
+			} catch (err) {
+				const reason = err instanceof Error ? err.message : String(err);
+				failures.push(`${label}: ${reason}`);
+			}
+		}
+
+		if (ctx.hasUI && failures.length > 0) {
+			ctx.ui.notify(`auto-session-name failed: ${failures.join("; ")}`, "warning");
 		}
 	} finally {
-		inflight.delete(guard);
+		namingInflight = false;
 	}
+}
+
+async function nameWithModel(
+	ctx: ExtensionContext,
+	model: Model<any>,
+	userPayload: string,
+	maxLength: number,
+): Promise<string> {
+	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+	if (!auth.ok || !auth.apiKey) {
+		throw new Error("no API key");
+	}
+
+	const response = await complete(
+		model as Model<never>,
+		{
+			messages: [
+				{
+					role: "user",
+					content: [{ type: "text", text: userPayload }],
+					timestamp: Date.now(),
+				},
+			],
+		},
+		{
+			apiKey: auth.apiKey,
+			headers: auth.headers,
+			signal: ctx.signal,
+		},
+	);
+
+	if (response.stopReason === "error" || response.stopReason === "aborted") {
+		throw new Error(response.errorMessage?.trim() || response.stopReason);
+	}
+
+	return sanitizeTitle(extractAssistantText(response.content), maxLength);
 }
 
 function extractAssistantText(content: readonly { type: string; text?: string }[]): string {
@@ -231,11 +317,12 @@ function loadSettings(): AutoNameSettings {
 		enabled: true,
 		maxLength: DEFAULT_MAX_LENGTH,
 		style: DEFAULT_STYLE,
+		fallbackModels: [],
 	};
 
 	const configPath = join(homedir(), CONFIG_DIR_NAME, "agent", "@myagent", "auto-session-name", "config.json");
 
-	const merged: AutoNameSettings = { ...fallback };
+	const merged: AutoNameSettings = { ...fallback, fallbackModels: [] };
 	try {
 		const raw = readFileSync(configPath, "utf-8");
 		const s = JSON.parse(raw) as Record<string, unknown>;
@@ -246,6 +333,18 @@ function loadSettings(): AutoNameSettings {
 		if (s.style === "concise" || s.style === "descriptive") merged.style = s.style;
 		if (typeof s.prompt === "string" && s.prompt.trim()) merged.prompt = s.prompt;
 		if (typeof s.model === "string" && s.model.trim()) merged.model = s.model.trim();
+		if (Array.isArray(s.fallbackModels)) {
+			const refs: string[] = [];
+			const seen = new Set<string>();
+			for (const item of s.fallbackModels) {
+				if (typeof item !== "string") continue;
+				const ref = item.trim();
+				if (!ref || seen.has(ref)) continue;
+				seen.add(ref);
+				refs.push(ref);
+			}
+			merged.fallbackModels = refs;
+		}
 	} catch {
 		// File missing or unparseable — use defaults.
 	}
