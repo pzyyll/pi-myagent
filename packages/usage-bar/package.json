@@ -1,0 +1,26 @@
+{
+	"name": "@myagent/usage-bar",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Footer usage bar for Codex subscription rate limits, shown only for the openai-codex provider.",
+	"keywords": [
+		"pi-package",
+		"pi-extension"
+	],
+	"files": [
+		"src",
+		"README.md"
+	],
+	"scripts": {
+		"test": "bun test"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-ai": "*"
+	},
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	}
+}

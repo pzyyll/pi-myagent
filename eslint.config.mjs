@@ -28,12 +28,19 @@ export default defineConfig(
 	},
 	{
 		files: ["**/*.ts"],
+		ignores: ["**/*.test.ts"],
 		languageOptions: {
 			parserOptions: {
 				projectService: true,
 				tsconfigRootDir: import.meta.dirname,
 			},
 		},
+		rules: {
+			"@typescript-eslint/no-explicit-any": "off",
+		},
+	},
+	{
+		files: ["**/*.test.ts"],
 		rules: {
 			"@typescript-eslint/no-explicit-any": "off",
 		},

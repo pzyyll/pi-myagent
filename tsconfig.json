@@ -9,5 +9,6 @@
 		"allowSyntheticDefaultImports": true,
 		"forceConsistentCasingInFileNames": true
 	},
-	"include": ["packages/*/src/**/*.ts"]
+	"include": ["packages/*/src/**/*.ts"],
+	"exclude": ["**/*.test.ts"]
 }

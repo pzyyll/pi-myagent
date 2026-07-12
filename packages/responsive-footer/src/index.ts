@@ -50,7 +50,7 @@ function truncateToWidth(text: string, width: number, ellipsis = "..."): string 
 	let output = "";
 	let used = 0;
 
-	for (let i = 0; i < text.length; ) {
+	for (let i = 0; i < text.length;) {
 		const ansi = text.slice(i).match(/^\x1b\[[0-?]*[ -/]*[@-~]/);
 		if (ansi) {
 			output += ansi[0];
@@ -90,7 +90,7 @@ function wrapStatusItems(items: string[], width: number): string[] {
 	};
 
 	const appendText = (text: string) => {
-		for (let i = 0; i < text.length; ) {
+		for (let i = 0; i < text.length;) {
 			const ansi = text.slice(i).match(/^\x1b\[[0-?]*[ -/]*[@-~]/);
 			if (ansi) {
 				line += ansi[0];

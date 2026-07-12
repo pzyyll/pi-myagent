@@ -1135,7 +1135,7 @@ function truncateAnsiToWidth(text: string, width: number): string {
 	let out = "";
 	let visible = 0;
 	let truncated = false;
-	for (let i = 0; i < text.length; ) {
+	for (let i = 0; i < text.length;) {
 		if (text[i] === "\x1b") {
 			const end = text.indexOf("m", i);
 			if (end !== -1) {
