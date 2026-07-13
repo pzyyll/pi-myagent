@@ -26,6 +26,14 @@ Codex 5h ███░░░░░ 38% ⟳ 2h  W ██████░░ 75% ⟳
 - Transient network failures and request timeouts are retried up to three total attempts with 2-second and 4-second exponential backoff delays.
 - A network warning is shown only after all three attempts fail. The last successful status is kept until the next successful fetch or provider switch.
 
+## Commands
+
+| Command   | Description                                                                                                                                        |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/usages` | Show detailed Codex plan usage (plan type, rate-limit windows, credits, monthly spend control, additional limits, and reset credits when present). |
+
+`/usages` is always available, regardless of the active model. Each invocation finds configured `openai-codex` credentials and performs a fresh query against the same authenticated usage endpoint as the footer bar. If no Codex credentials are configured, it reports that no usage information is available. On success it opens a dismissible detail panel (enter/esc) in TUI mode; otherwise it sends a plain-text summary notification.
+
 ## Integration
 
 The status is published under the `usage-bars` key, which `@myagent/responsive-footer` already renders as a dedicated footer line. No configuration file is required.

@@ -1,9 +1,15 @@
-// ABOUTME: Pi extension showing Codex subscription rate-limit usage as a footer status bar.
-// ABOUTME: Active only for the openai-codex provider; polls the standard codex usage endpoint.
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+// ABOUTME: Pi extension showing Codex subscription usage in a footer and detailed command view.
+// ABOUTME: Polls for active Codex models while keeping on-demand plan details always available.
+import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
 import { retryNetworkRequest } from "./retry";
-import { parseCodexUsage, renderCodexUsage, type CodexUsage } from "./usage";
+import {
+	parseCodexPlanUsage,
+	renderCodexPlanUsageDetails,
+	renderCodexUsage,
+	type CodexPlanUsage,
+	type CodexUsage,
+} from "./usage";
 
 const PROVIDER_ID = "openai-codex";
 const STATUS_KEY = "usage-bars";
@@ -12,6 +18,8 @@ const POLL_INTERVAL_MS = 2 * 60 * 1_000;
 const FETCH_TIMEOUT_MS = 12_000;
 const FRESH_FETCH_MS = 5_000;
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
+
+type FetchResult = { ok: true; usage: CodexPlanUsage } | { ok: false; error: string; aborted?: boolean };
 
 export default function (pi: ExtensionAPI) {
 	let timer: ReturnType<typeof setInterval> | undefined;
@@ -38,10 +46,16 @@ export default function (pi: ExtensionAPI) {
 		ctx.ui.setStatus(STATUS_KEY, undefined);
 	};
 
-	const render = (ctx: ExtensionContext, usage: CodexUsage): string =>
+	const renderStatus = (ctx: ExtensionContext, usage: CodexUsage): string =>
 		renderCodexUsage(usage, (color, text) => ctx.ui.theme.fg(color, text));
 
-	const refresh = async (ctx: ExtensionContext, model: Model<any>) => {
+	const applyUsage = (ctx: ExtensionContext, usage: CodexPlanUsage) => {
+		if (usage.windows.length > 0) {
+			ctx.ui.setStatus(STATUS_KEY, renderStatus(ctx, { windows: usage.windows, usable: true }));
+		}
+	};
+
+	const fetchPlanUsage = async (ctx: ExtensionContext, model: Model<any>): Promise<FetchResult> => {
 		const gen = generation;
 		lastFetchAt = Date.now();
 
@@ -49,13 +63,11 @@ export default function (pi: ExtensionAPI) {
 		try {
 			auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 		} catch {
-			notifyOnce(ctx, "usage-bar: auth resolution failed");
-			return;
+			return { ok: false, error: "usage-bar: auth resolution failed" };
 		}
-		if (gen !== generation) return;
+		if (gen !== generation) return { ok: false, error: "usage-bar: cancelled", aborted: true };
 		if (!auth.ok) {
-			notifyOnce(ctx, `usage-bar: ${auth.error}`);
-			return;
+			return { ok: false, error: `usage-bar: ${auth.error}` };
 		}
 
 		const headers: Record<string, string> = {
@@ -101,23 +113,32 @@ export default function (pi: ExtensionAPI) {
 				},
 				() => gen === generation,
 			);
-			if (gen !== generation) return;
+			if (gen !== generation) return { ok: false, error: "usage-bar: cancelled", aborted: true };
 			if (!result.response.ok) {
-				notifyOnce(ctx, `usage-bar: HTTP ${result.response.status}`);
-				return;
+				return { ok: false, error: `usage-bar: HTTP ${result.response.status}` };
 			}
-			const usage = parseCodexUsage(result.json, Date.now());
+			const usage = parseCodexPlanUsage(result.json, Date.now());
 			if (!usage.usable) {
-				notifyOnce(ctx, "usage-bar: unrecognized usage payload");
-				return;
+				return { ok: false, error: "usage-bar: unrecognized usage payload" };
 			}
-			notifiedFailure = false;
-			ctx.ui.setStatus(STATUS_KEY, render(ctx, usage));
+			return { ok: true, usage };
 		} catch (err) {
-			if (gen === generation) {
-				notifyOnce(ctx, `usage-bar: ${err instanceof Error ? err.message : "request failed"}`);
-			}
+			if (gen !== generation) return { ok: false, error: "usage-bar: cancelled", aborted: true };
+			return {
+				ok: false,
+				error: `usage-bar: ${err instanceof Error ? err.message : "request failed"}`,
+			};
 		}
+	};
+
+	const refresh = async (ctx: ExtensionContext, model: Model<any>) => {
+		const result = await fetchPlanUsage(ctx, model);
+		if (!result.ok) {
+			if (!result.aborted) notifyOnce(ctx, result.error);
+			return;
+		}
+		notifiedFailure = false;
+		applyUsage(ctx, result.usage);
 	};
 
 	const poll = (ctx: ExtensionContext, model: Model<any>) => {
@@ -150,6 +171,47 @@ export default function (pi: ExtensionAPI) {
 		}
 	};
 
+	const showPlanDetails = async (ctx: ExtensionCommandContext, usage: CodexPlanUsage) => {
+		const lines = renderCodexPlanUsageDetails(usage, (color, text) => ctx.ui.theme.fg(color, text));
+		if (!ctx.hasUI || ctx.mode !== "tui") {
+			ctx.ui.notify(stripAnsi(lines.join(" · ")), "info");
+			return;
+		}
+
+		await ctx.ui.custom((_tui, theme, keybindings, done) => {
+			const footer = theme.fg("dim", "Press enter or esc to close");
+			const rendered = [...lines, "", footer];
+			return {
+				render: () => rendered,
+				invalidate: () => {},
+				handleInput: (data: string) => {
+					if (keybindings.matches(data, "tui.select.cancel") || keybindings.matches(data, "tui.select.confirm")) {
+						done(undefined);
+					}
+				},
+			};
+		});
+	};
+
+	pi.registerCommand("usages", {
+		description: "Show Codex plan usage details",
+		handler: async (_args, ctx) => {
+			const model = ctx.modelRegistry.getAvailable().find((candidate) => candidate.provider === PROVIDER_ID);
+			if (!model) {
+				ctx.ui.notify("usage-bar: no Codex usage information available", "info");
+				return;
+			}
+
+			const result = await fetchPlanUsage(ctx, model);
+			if (!result.ok) {
+				if (!result.aborted) ctx.ui.notify(result.error, "warning");
+				return;
+			}
+			notifiedFailure = false;
+			await showPlanDetails(ctx, result.usage);
+		},
+	});
+
 	pi.on("session_start", (_event, ctx) => sync(ctx, ctx.model));
 	pi.on("model_select", (event, ctx) => sync(ctx, event.model));
 	pi.on("session_shutdown", (_event, ctx) => deactivate(ctx));
@@ -181,4 +243,8 @@ function extractAccountId(token: string | undefined): string | undefined {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function stripAnsi(text: string): string {
+	return text.replace(/\u001b\[[0-9;]*m/g, "");
 }
