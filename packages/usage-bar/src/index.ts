@@ -2,6 +2,7 @@
 // ABOUTME: Active only for the openai-codex provider; polls the standard codex usage endpoint.
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
+import { retryNetworkRequest } from "./retry";
 import { parseCodexUsage, renderCodexUsage, type CodexUsage } from "./usage";
 
 const PROVIDER_ID = "openai-codex";
@@ -57,10 +58,6 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		const controller = new AbortController();
-		abort = controller;
-		const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
 		const headers: Record<string, string> = {
 			Accept: "application/json",
 			"User-Agent": "codex-cli",
@@ -80,15 +77,36 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		try {
-			const res = await fetch(ENDPOINT, { headers, signal: controller.signal });
+			const result = await retryNetworkRequest(
+				async () => {
+					const controller = new AbortController();
+					abort = controller;
+					let timedOut = false;
+					const timeoutId = setTimeout(() => {
+						timedOut = true;
+						controller.abort();
+					}, FETCH_TIMEOUT_MS);
+
+					try {
+						const response = await fetch(ENDPOINT, { headers, signal: controller.signal });
+						const json: unknown = response.ok ? await response.json() : undefined;
+						return { response, json };
+					} catch (error) {
+						if (timedOut) throw new Error("request timed out", { cause: error });
+						throw error;
+					} finally {
+						clearTimeout(timeoutId);
+						if (abort === controller) abort = undefined;
+					}
+				},
+				() => gen === generation,
+			);
 			if (gen !== generation) return;
-			if (!res.ok) {
-				notifyOnce(ctx, `usage-bar: HTTP ${res.status}`);
+			if (!result.response.ok) {
+				notifyOnce(ctx, `usage-bar: HTTP ${result.response.status}`);
 				return;
 			}
-			const json = await res.json();
-			if (gen !== generation) return;
-			const usage = parseCodexUsage(json, Date.now());
+			const usage = parseCodexUsage(result.json, Date.now());
 			if (!usage.usable) {
 				notifyOnce(ctx, "usage-bar: unrecognized usage payload");
 				return;
@@ -96,12 +114,9 @@ export default function (pi: ExtensionAPI) {
 			notifiedFailure = false;
 			ctx.ui.setStatus(STATUS_KEY, render(ctx, usage));
 		} catch (err) {
-			if (gen === generation && !controller.signal.aborted) {
+			if (gen === generation) {
 				notifyOnce(ctx, `usage-bar: ${err instanceof Error ? err.message : "request failed"}`);
 			}
-		} finally {
-			clearTimeout(timeoutId);
-			if (abort === controller) abort = undefined;
 		}
 	};
 

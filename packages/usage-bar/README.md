@@ -23,7 +23,8 @@ Codex 5h ███░░░░░ 38% ⟳ 2h  W ██████░░ 75% ⟳
   - weekly only
   - both windows
 - Missing, `null`, or non-finite windows are omitted; if no valid window remains, the bar stays hidden.
-- On a refresh failure, the last successful status is kept until the next successful fetch or provider switch.
+- Transient network failures and request timeouts are retried up to three total attempts with 2-second and 4-second exponential backoff delays.
+- A network warning is shown only after all three attempts fail. The last successful status is kept until the next successful fetch or provider switch.
 
 ## Integration
 
