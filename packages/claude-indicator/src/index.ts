@@ -1162,8 +1162,10 @@ export default function (pi: ExtensionAPI) {
 	let tick: ReturnType<typeof setInterval> | undefined;
 	let previewTick: ReturnType<typeof setInterval> | undefined;
 	let previewStartedAt = 0;
+	let activeThinkingLevel: string | undefined;
 
 	const currentThinkingLevel = () => String(pi.getThinkingLevel?.() ?? "off");
+	const effectiveThinkingLevel = () => activeThinkingLevel ?? currentThinkingLevel();
 
 	const stopTicker = () => {
 		if (!tick) return;
@@ -1175,7 +1177,7 @@ export default function (pi: ExtensionAPI) {
 		stopTicker();
 		tick = setInterval(() => {
 			if (mode !== CLAUDE_MODE || !runtime) return;
-			refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
+			refreshClaudeIndicator(ctx, runtime, effectiveThinkingLevel());
 		}, INDICATOR_TICK_MS);
 	};
 
@@ -1254,7 +1256,8 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("agent_start", (_event, ctx) => {
 		if (mode !== CLAUDE_MODE) return;
-		runtime = applyRandomClaudeMessage(ctx, currentThinkingLevel(), true);
+		activeThinkingLevel = currentThinkingLevel();
+		runtime = applyRandomClaudeMessage(ctx, activeThinkingLevel, true);
 		startTicker(ctx);
 	});
 
@@ -1270,7 +1273,7 @@ export default function (pi: ExtensionAPI) {
 
 		if (assistantEvent.type === "thinking_start" || assistantEvent.type === "thinking_delta") {
 			if (runtime.thinking.kind !== "active") runtime.thinking = { kind: "active", startedAt: now };
-			refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
+			refreshClaudeIndicator(ctx, runtime, effectiveThinkingLevel());
 			return;
 		}
 
@@ -1281,37 +1284,38 @@ export default function (pi: ExtensionAPI) {
 				durationMs: now - startedAt,
 				shownUntil: now + THINKING_COMPLETED_SHOWN_MS,
 			};
-			refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
+			refreshClaudeIndicator(ctx, runtime, effectiveThinkingLevel());
 			return;
 		}
 
 		if (wasRequesting || now - runtime.lastFrameRefreshAt > INDICATOR_REFRESH_THROTTLE_MS)
-			refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
+			refreshClaudeIndicator(ctx, runtime, effectiveThinkingLevel());
 	});
 
 	pi.on("message_end", (event, ctx) => {
 		if (mode !== CLAUDE_MODE || !runtime) return;
 		runtime.lastProgressAt = Date.now();
 		updateRuntimeFromMessage(event.message);
-		refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
+		refreshClaudeIndicator(ctx, runtime, effectiveThinkingLevel());
 	});
 
 	pi.on("tool_execution_start", (_event, ctx) => {
 		if (mode !== CLAUDE_MODE || !runtime) return;
 		runtime.activeTools += 1;
 		runtime.lastProgressAt = Date.now();
-		refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
+		refreshClaudeIndicator(ctx, runtime, effectiveThinkingLevel());
 	});
 
 	pi.on("tool_execution_end", (_event, ctx) => {
 		if (mode !== CLAUDE_MODE || !runtime) return;
 		runtime.activeTools = Math.max(0, runtime.activeTools - 1);
 		runtime.lastProgressAt = Date.now();
-		refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
+		refreshClaudeIndicator(ctx, runtime, effectiveThinkingLevel());
 	});
 
 	pi.on("agent_end", async () => {
 		stopTicker();
+		activeThinkingLevel = undefined;
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
@@ -1320,7 +1324,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("thinking_level_select", (_event, ctx) => {
-		if (mode === CLAUDE_MODE && runtime) refreshClaudeIndicator(ctx, runtime, currentThinkingLevel());
+		if (mode === CLAUDE_MODE && runtime) refreshClaudeIndicator(ctx, runtime, effectiveThinkingLevel());
 	});
 
 	pi.registerCommand("claude-indicator", {
