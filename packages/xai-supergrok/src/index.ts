@@ -1,16 +1,61 @@
-// ABOUTME: Registers SuperGrok device-code OAuth for Pi's built-in xAI provider.
-// ABOUTME: Uses OpenAI Responses models for xAI with explicit prompt_cache_key sticky routing.
+// ABOUTME: Registers a SuperGrok subscription OAuth provider separate from built-in xAI API keys.
+// ABOUTME: Dynamically loads cli-chat-proxy /v1/models catalog (grok-build session auth path).
+import { execFileSync } from "node:child_process";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { URLSearchParams } from "node:url";
-import type { OAuthCredentials, OAuthLoginCallbacks } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
+import type { Api, Model, OAuthCredentials, OAuthLoginCallbacks } from "@earendil-works/pi-ai";
+import type { ExtensionAPI, ExtensionContext, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
+import { type CatalogModel, FALLBACK_CATALOG, fetchModelsCatalog, isRecord, sanitizeModelsCatalog } from "./catalog";
 
 const CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828";
-const XAI_BASE_URL = "https://api.x.ai/v1";
+// Resolve the installed grok CLI version so the proxy attributes requests to a
+// real Grok Build client version. Falls back if grok isn't discoverable.
+const GROK_VERSION_FALLBACK = "0.2.101";
+
+function resolveGrokVersion(): string {
+	const grokHome = process.env.GROK_HOME || join(homedir(), ".grok");
+	const candidates = ["grok", join(grokHome, "bin", "grok")];
+	for (const bin of candidates) {
+		try {
+			const out = execFileSync(bin, ["--version"], {
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
+				timeout: 5_000,
+			});
+			const match = out.match(/(\d+\.\d+\.\d+(?:-[^\s)]+)?)/);
+			if (match) return match[1];
+		} catch {
+			// grok not found at this candidate path; try the next.
+		}
+	}
+	return GROK_VERSION_FALLBACK;
+}
+
+const CLIENT_VERSION = resolveGrokVersion();
+// pi renders the device code + URL in its TUI, matching grok-build's `Ui` surface.
+const CLIENT_SURFACE = "ui";
+// Match grok-build's client identifier so the proxy attributes traffic to the
+// Grok CLI product (not a generic API client) for subscription gating.
+const CLIENT_IDENTIFIER = "grok-shell";
+const OAUTH_REFERRER = "grok-build";
+// Subscription OAuth path only (matches grok-build session routing).
+// Built-in Pi provider `xai` + XAI_API_KEY remains the public API-key path.
+const PROVIDER_ID = "xai-supergrok";
+const CLI_CHAT_PROXY_BASE_URL = "https://cli-chat-proxy.grok.com/v1";
+// Proxy-only headers injected when baseUrl is cli-chat-proxy.
+const TOKEN_AUTH_HEADER = "X-XAI-Token-Auth";
+const TOKEN_AUTH_VALUE = "xai-grok-cli";
+const AUTHENTICATE_RESPONSE_HEADER = "x-authenticateresponse";
+const AUTHENTICATE_RESPONSE_VALUE = "authenticate-response";
+const CLIENT_MODE_HEADER = "x-grok-client-mode";
+const CLIENT_MODE_VALUE = "interactive";
 const TOKEN_URL = "https://auth.x.ai/oauth2/token";
 const DEVICE_AUTHORIZATION_URL = "https://auth.x.ai/oauth2/device/code";
 const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
-const SCOPE = "openid profile email offline_access grok-cli:access api:access";
+// Frozen xAI OAuth2 client scope contract (8 scopes) - server expects exactly this set.
+const SCOPE = "openid profile email offline_access grok-cli:access api:access conversations:read conversations:write";
 
 const DEVICE_CODE_DEFAULT_INTERVAL_MS = 5_000;
 const DEVICE_CODE_MIN_INTERVAL_MS = 1_000;
@@ -26,6 +71,11 @@ const XAI_RESPONSES_COMPAT = {
 	supportsLongCacheRetention: false,
 };
 const XAI_REASONING_LEVELS = { off: null, minimal: null } satisfies ProviderModelConfig["thinkingLevelMap"];
+
+/** OAuth credentials plus the cached remote model catalog (Radius-style). */
+type SuperGrokCredentials = OAuthCredentials & {
+	modelsCatalog?: CatalogModel[];
+};
 
 interface XaiTokenResponse {
 	access_token?: string;
@@ -49,104 +99,12 @@ interface DeviceTokenErrorBody {
 	error_description?: string;
 }
 
-function xaiModel(model: Omit<ProviderModelConfig, "api" | "compat" | "thinkingLevelMap">): ProviderModelConfig {
-	return {
-		...model,
-		api: "openai-responses",
-		thinkingLevelMap: model.reasoning ? XAI_REASONING_LEVELS : undefined,
-		input: [...model.input],
-		cost: { ...model.cost },
-		compat: XAI_RESPONSES_COMPAT,
-	};
-}
-
-const XAI_MODELS: ProviderModelConfig[] = [
-	xaiModel({
-		id: "grok-3",
-		name: "Grok 3",
-		reasoning: false,
-		input: ["text"],
-		cost: { input: 3, output: 15, cacheRead: 0.75, cacheWrite: 0 },
-		contextWindow: 131_072,
-		maxTokens: 8192,
-	}),
-	xaiModel({
-		id: "grok-3-fast",
-		name: "Grok 3 Fast",
-		reasoning: false,
-		input: ["text"],
-		cost: { input: 5, output: 25, cacheRead: 1.25, cacheWrite: 0 },
-		contextWindow: 131_072,
-		maxTokens: 8192,
-	}),
-	xaiModel({
-		id: "grok-4.20-0309-non-reasoning",
-		name: "Grok 4.20 (Non-Reasoning)",
-		reasoning: false,
-		input: ["text", "image"],
-		cost: { input: 1.25, output: 2.5, cacheRead: 0.2, cacheWrite: 0 },
-		contextWindow: 1_000_000,
-		maxTokens: 30_000,
-	}),
-	xaiModel({
-		id: "grok-4.20-0309-reasoning",
-		name: "Grok 4.20 (Reasoning)",
-		reasoning: true,
-		input: ["text", "image"],
-		cost: { input: 1.25, output: 2.5, cacheRead: 0.2, cacheWrite: 0 },
-		contextWindow: 1_000_000,
-		maxTokens: 30_000,
-	}),
-	xaiModel({
-		id: "grok-4.3",
-		name: "Grok 4.3",
-		reasoning: true,
-		input: ["text", "image"],
-		cost: { input: 1.25, output: 2.5, cacheRead: 0.2, cacheWrite: 0 },
-		contextWindow: 1_000_000,
-		maxTokens: 30_000,
-	}),
-	xaiModel({
-		id: "grok-4.5",
-		name: "Grok 4.5",
-		reasoning: true,
-		input: ["text", "image"],
-		cost: { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 0 },
-		contextWindow: 500_000,
-		maxTokens: 30_000,
-	}),
-	xaiModel({
-		id: "grok-build-0.1",
-		name: "Grok Build 0.1",
-		reasoning: true,
-		input: ["text", "image"],
-		cost: { input: 1, output: 2, cacheRead: 0.2, cacheWrite: 0 },
-		contextWindow: 256_000,
-		maxTokens: 256_000,
-	}),
-	xaiModel({
-		id: "grok-code-fast-1",
-		name: "Grok Code Fast 1",
-		reasoning: false,
-		input: ["text"],
-		cost: { input: 0.2, output: 1.5, cacheRead: 0.02, cacheWrite: 0 },
-		contextWindow: 32_768,
-		maxTokens: 8192,
-	}),
-];
-
-function xaiModels(): ProviderModelConfig[] {
-	return XAI_MODELS.map((model) => ({
-		...model,
-		input: [...model.input],
-		cost: { ...model.cost },
-	}));
-}
-
 function authHeaders() {
 	return {
 		"Content-Type": "application/x-www-form-urlencoded",
 		Accept: "application/json",
+		"x-grok-client-version": CLIENT_VERSION,
+		"x-grok-client-surface": CLIENT_SURFACE,
 	};
 }
 
@@ -177,6 +135,7 @@ async function requestDeviceCode(
 		body: new URLSearchParams({
 			client_id: CLIENT_ID,
 			scope: SCOPE,
+			referrer: OAUTH_REFERRER,
 		}).toString(),
 		signal,
 	});
@@ -208,6 +167,51 @@ function toLoginCredentials(tokens: XaiTokenResponse): OAuthCredentials {
 		access: tokens.access_token,
 		expires: expiresAt(tokens.expires_in),
 	};
+}
+
+function getModelsCatalog(credentials: OAuthCredentials | undefined): CatalogModel[] | undefined {
+	if (!credentials) return undefined;
+	return sanitizeModelsCatalog((credentials as SuperGrokCredentials).modelsCatalog);
+}
+
+/**
+ * Fetch remote catalog and attach it to credentials.
+ * On failure, retain the previous catalog so models do not vanish (Radius pattern).
+ */
+async function attachModelsCatalog(
+	credentials: OAuthCredentials,
+	previous?: OAuthCredentials,
+	signal?: AbortSignal,
+): Promise<SuperGrokCredentials> {
+	try {
+		const modelsCatalog = await fetchModelsCatalog(
+			CLI_CHAT_PROXY_BASE_URL,
+			{
+				accessToken: credentials.access,
+				clientVersion: CLIENT_VERSION,
+				clientIdentifier: CLIENT_IDENTIFIER,
+				tokenAuthValue: TOKEN_AUTH_VALUE,
+				clientModeValue: CLIENT_MODE_VALUE,
+			},
+			signal,
+		);
+		if (modelsCatalog.length > 0) {
+			return { ...credentials, modelsCatalog };
+		}
+		const previousCatalog = getModelsCatalog(previous);
+		if (previousCatalog) {
+			return { ...credentials, modelsCatalog: previousCatalog };
+		}
+		// Empty remote list with no prior cache — keep the bake-in fallback so /model works.
+		return { ...credentials, modelsCatalog: FALLBACK_CATALOG };
+	} catch {
+		const previousCatalog = getModelsCatalog(previous);
+		if (previousCatalog) {
+			return { ...credentials, modelsCatalog: previousCatalog };
+		}
+		// Initial login / no cache: keep bake-in fallback so /model still works.
+		return { ...credentials, modelsCatalog: FALLBACK_CATALOG };
+	}
 }
 
 async function pollDeviceCodeToken(device: DeviceCodeResponse, signal?: AbortSignal): Promise<XaiTokenResponse> {
@@ -273,7 +277,8 @@ async function loginXai(callbacks: OAuthLoginCallbacks): Promise<OAuthCredential
 	});
 
 	const tokens = await pollDeviceCodeToken(device, callbacks.signal);
-	return toLoginCredentials(tokens);
+	const credentials = toLoginCredentials(tokens);
+	return attachModelsCatalog(credentials, undefined, callbacks.signal);
 }
 
 async function refreshAccessToken(refreshToken: string, signal?: AbortSignal): Promise<XaiTokenResponse> {
@@ -300,12 +305,13 @@ async function refreshXaiToken(credentials: OAuthCredentials): Promise<OAuthCred
 	const tokens = await refreshAccessToken(credentials.refresh);
 	if (!tokens.access_token) throw new Error("xAI token refresh response is missing access_token");
 
-	return {
+	const refreshed: OAuthCredentials = {
 		...credentials,
 		access: tokens.access_token,
 		refresh: tokens.refresh_token ?? credentials.refresh,
 		expires: expiresAt(tokens.expires_in),
 	};
+	return attachModelsCatalog(refreshed, credentials);
 }
 
 function clampPromptCacheKey(key: string | undefined): string | undefined {
@@ -313,10 +319,6 @@ function clampPromptCacheKey(key: string | undefined): string | undefined {
 	const chars = Array.from(key);
 	if (chars.length <= PROMPT_CACHE_KEY_MAX_LENGTH) return key;
 	return chars.slice(0, PROMPT_CACHE_KEY_MAX_LENGTH).join("");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function withXaiPromptCache(payload: unknown, sessionId: string | undefined): unknown {
@@ -333,22 +335,128 @@ function withXaiPromptCache(payload: unknown, sessionId: string | undefined): un
 	return next;
 }
 
-export default function (pi: ExtensionAPI) {
-	pi.registerProvider("xai", {
-		baseUrl: XAI_BASE_URL,
-		apiKey: "$XAI_API_KEY",
+function isCliChatProxyUrl(url: string | undefined): boolean {
+	if (!url) return false;
+	try {
+		return new URL(url).host === "cli-chat-proxy.grok.com";
+	} catch {
+		return url.includes("cli-chat-proxy.grok.com");
+	}
+}
+
+/**
+ * Shared catalog → model field mapping (compat + reasoning levels).
+ * Used for both registry seed configs and oauth.modifyModels Model objects.
+ */
+function catalogModelFields(entry: CatalogModel) {
+	return {
+		id: entry.id,
+		name: entry.name,
+		reasoning: entry.reasoning,
+		thinkingLevelMap: entry.reasoning ? XAI_REASONING_LEVELS : undefined,
+		input: [...entry.input] as Array<"text" | "image">,
+		cost: { ...entry.cost },
+		contextWindow: entry.contextWindow,
+		maxTokens: entry.maxTokens,
+		compat: XAI_RESPONSES_COMPAT,
+	};
+}
+
+/** ProviderModelConfig seed entry so Pi 0.80.7 enters the models + modifyModels path. */
+export function catalogToProviderModelConfig(entry: CatalogModel): ProviderModelConfig {
+	return catalogModelFields(entry);
+}
+
+/** Full Model used by oauth.modifyModels when swapping in the credential catalog. */
+export function catalogToModel(entry: CatalogModel): Model<Api> {
+	return {
+		...catalogModelFields(entry),
 		api: "openai-responses",
-		models: xaiModels(),
+		provider: PROVIDER_ID,
+		baseUrl: CLI_CHAT_PROXY_BASE_URL,
+	};
+}
+
+/**
+ * Non-empty seed from FALLBACK_CATALOG.
+ * Pi skips oauth.modifyModels when registerProvider is given models: [] (0.80.7
+ * applyProviderConfig only runs the models + modifyModels branch when length > 0).
+ * Remote catalog on credentials still replaces this seed via modifyModels.
+ */
+export const SEED_MODELS: ProviderModelConfig[] = FALLBACK_CATALOG.map(catalogToProviderModelConfig);
+
+/**
+ * Replace this provider's models with the credential-cached remote catalog.
+ * Mirrors Radius gateway OAuth: catalog lives on credentials; baseUrl stays cli-chat-proxy.
+ * Falls back to FALLBACK_CATALOG when credentials have no usable modelsCatalog.
+ */
+export function modifyXaiModelsForOAuth(models: Model<Api>[], credentials: OAuthCredentials): Model<Api>[] {
+	const others = models.filter((model) => model.provider !== PROVIDER_ID);
+	const catalog = getModelsCatalog(credentials) ?? FALLBACK_CATALOG;
+	return [...others, ...catalog.map(catalogToModel)];
+}
+
+export { PROVIDER_ID, FALLBACK_CATALOG };
+
+/** Background refresh so existing logins without modelsCatalog get a real list. */
+async function refreshCatalogInBackground(ctx: ExtensionContext): Promise<void> {
+	const cred = ctx.modelRegistry.authStorage.get(PROVIDER_ID);
+	if (!cred || cred.type !== "oauth") return;
+
+	try {
+		const updated = await attachModelsCatalog(cred, cred);
+		const nextCatalog = getModelsCatalog(updated);
+		const prevCatalog = getModelsCatalog(cred);
+		const changed =
+			JSON.stringify(nextCatalog?.map((m) => m.id) ?? []) !== JSON.stringify(prevCatalog?.map((m) => m.id) ?? []);
+
+		ctx.modelRegistry.authStorage.set(PROVIDER_ID, { ...updated, type: "oauth" });
+		if (changed || !prevCatalog) {
+			ctx.modelRegistry.refresh();
+		}
+	} catch {
+		// Keep whatever catalog/fallback is already on disk.
+	}
+}
+
+export default function (pi: ExtensionAPI) {
+	pi.registerProvider(PROVIDER_ID, {
+		name: "xAI SuperGrok",
+		// Subscription OAuth only — does not share credentials with built-in `xai` / XAI_API_KEY.
+		baseUrl: CLI_CHAT_PROXY_BASE_URL,
+		api: "openai-responses",
+		// Non-empty seed required so Pi 0.80.7 runs models registration + oauth.modifyModels.
+		// Credential-cached remote catalog replaces the seed; FALLBACK_CATALOG if none/unavailable.
+		models: SEED_MODELS,
 		oauth: {
-			name: "xAI Grok OAuth (SuperGrok)",
+			name: "xAI SuperGrok (Subscription OAuth)",
 			login: loginXai,
 			refreshToken: refreshXaiToken,
 			getApiKey: (credentials) => credentials.access,
+			modifyModels: modifyXaiModelsForOAuth,
 		},
 	});
 
+	// Upgrade old auth.json entries that predate modelsCatalog, and refresh entitlements.
+	pi.on("session_start", (_event, ctx) => {
+		void refreshCatalogInBackground(ctx);
+	});
+
 	pi.on("before_provider_request", (event, ctx) => {
-		if (ctx.model?.provider !== "xai") return;
+		if (ctx.model?.provider !== PROVIDER_ID) return;
 		return withXaiPromptCache(event.payload, ctx.sessionManager.getSessionId());
+	});
+
+	pi.on("before_provider_headers", (event, ctx) => {
+		if (ctx.model?.provider !== PROVIDER_ID) return;
+		event.headers["x-grok-client-version"] = CLIENT_VERSION;
+		event.headers["x-grok-client-identifier"] = CLIENT_IDENTIFIER;
+
+		// cli-chat-proxy requires these product/auth attribution headers.
+		if (isCliChatProxyUrl(ctx.model.baseUrl)) {
+			event.headers[TOKEN_AUTH_HEADER] = TOKEN_AUTH_VALUE;
+			event.headers[AUTHENTICATE_RESPONSE_HEADER] = AUTHENTICATE_RESPONSE_VALUE;
+			event.headers[CLIENT_MODE_HEADER] = CLIENT_MODE_VALUE;
+		}
 	});
 }
