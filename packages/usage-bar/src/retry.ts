@@ -1,7 +1,7 @@
 // ABOUTME: Provides bounded exponential-backoff retries for transient usage endpoint failures.
 // ABOUTME: Stops retrying when the owning model or session is no longer active.
 export const NETWORK_ATTEMPTS = 3;
-export const RETRY_BASE_DELAY_MS = 2_000;
+export const RETRY_BASE_DELAY_MS = 8_000;
 
 type Delay = (milliseconds: number) => Promise<void>;
 
