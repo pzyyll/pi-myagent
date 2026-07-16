@@ -1,14 +1,24 @@
 // ABOUTME: Pure Codex usage parser and renderer for the rate-limit status payload.
 // ABOUTME: Handles primary/secondary windows independently and formats compact bars.
-export type ThemeColorName = "success" | "error" | "warning" | "muted" | "dim" | "text" | "accent";
+import {
+	BAR_WIDTH,
+	DETAIL_BAR_WIDTH,
+	clampPercent,
+	formatRemaining,
+	formatSnakeCase,
+	isFiniteNumber,
+	isPlainObject,
+	percentThemeColor,
+	pickObject,
+	renderBrandUsage,
+	renderWindow,
+	type ThemeColorName,
+	type ThemeFg,
+	type UsageWindow,
+} from "./shared";
 
-export type ThemeFg = (color: ThemeColorName, text: string) => string;
-
-export interface CodexUsageWindow {
-	readonly usedPercent: number; // clamped to 0..100
-	readonly label: string;
-	readonly resetsIn: string | undefined;
-}
+export type { ThemeColorName, ThemeFg };
+export type CodexUsageWindow = UsageWindow;
 
 export interface CodexUsage {
 	readonly windows: readonly CodexUsageWindow[];
@@ -53,8 +63,6 @@ const DURATION_TOLERANCE_SECONDS = 60;
 const SECONDS_PER_DAY = 86_400;
 const SECONDS_PER_HOUR = 3_600;
 const SECONDS_PER_MINUTE = 60;
-const BAR_WIDTH = 8;
-const DETAIL_BAR_WIDTH = 16;
 
 export function parseCodexUsage(raw: unknown, now: number): CodexUsage {
 	const plan = parseCodexPlanUsage(raw, now);
@@ -62,7 +70,7 @@ export function parseCodexUsage(raw: unknown, now: number): CodexUsage {
 }
 
 export function parseCodexPlanUsage(raw: unknown, now: number): CodexPlanUsage {
-	const root = pickObject(raw, "data") ?? (isPlainObject(raw) ? (raw as Record<string, unknown>) : undefined);
+	const root = pickObject(raw, "data") ?? (isPlainObject(raw) ? raw : undefined);
 	const planType = parsePlanType(root?.["plan_type"]);
 	const rateLimit = pickObject(root, "rate_limit");
 	const windows = parseRateLimitWindows(rateLimit, now);
@@ -100,9 +108,7 @@ export function parseCodexPlanUsage(raw: unknown, now: number): CodexPlanUsage {
 }
 
 export function renderCodexUsage(usage: CodexUsage, fg: ThemeFg): string {
-	const parts = usage.windows.map((w) => renderWindow(w, fg, BAR_WIDTH)).filter((s) => s.length > 0);
-	if (parts.length === 0) return "";
-	return `${fg("accent", "Codex")} ${parts.join("  ")}`;
+	return renderBrandUsage("Codex", usage.windows, fg, BAR_WIDTH);
 }
 
 export function renderCodexPlanUsageDetails(usage: CodexPlanUsage, fg: ThemeFg): string[] {
@@ -241,10 +247,9 @@ function parseAdditionalLimits(value: unknown, now: number): CodexAdditionalLimi
 	const out: CodexAdditionalLimit[] = [];
 	for (const item of value) {
 		if (!isPlainObject(item)) continue;
-		const record = item as Record<string, unknown>;
-		const nameRaw = record["limit_name"] ?? record["metered_feature"];
+		const nameRaw = item["limit_name"] ?? item["metered_feature"];
 		if (typeof nameRaw !== "string" || nameRaw.trim().length === 0) continue;
-		const windows = parseRateLimitWindows(pickObject(record, "rate_limit"), now);
+		const windows = parseRateLimitWindows(pickObject(item, "rate_limit"), now);
 		out.push({ name: nameRaw.trim(), windows });
 	}
 	return out;
@@ -252,7 +257,7 @@ function parseAdditionalLimits(value: unknown, now: number): CodexAdditionalLimi
 
 function parseReachedType(value: unknown): string | undefined {
 	if (typeof value === "string" && value.trim()) return value.trim();
-	const obj = isPlainObject(value) ? (value as Record<string, unknown>) : undefined;
+	const obj = isPlainObject(value) ? value : undefined;
 	if (!obj) return undefined;
 	const kind = obj["type"] ?? obj["kind"];
 	return typeof kind === "string" && kind.trim() ? kind.trim() : undefined;
@@ -290,29 +295,6 @@ function parseResetsIn(obj: Record<string, unknown>, now: number): string | unde
 	return formatRemaining(deadlineMs - now);
 }
 
-function formatRemaining(ms: number): string | undefined {
-	if (!Number.isFinite(ms)) return undefined;
-	if (ms <= 0) return "due";
-	const totalSeconds = Math.floor(ms / 1_000);
-	const days = Math.floor(totalSeconds / SECONDS_PER_DAY);
-	const hours = Math.floor((totalSeconds % SECONDS_PER_DAY) / SECONDS_PER_HOUR);
-	const minutes = Math.floor((totalSeconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE);
-	if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
-	if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
-	if (minutes > 0) return `${minutes}m`;
-	return "<1m";
-}
-
-function renderWindow(w: CodexUsageWindow, fg: ThemeFg, barWidth: number): string {
-	const filled = Math.round((w.usedPercent / 100) * barWidth);
-	const bar = "█".repeat(filled) + "░".repeat(barWidth - filled);
-	const percentColor: ThemeColorName = percentThemeColor(w.usedPercent);
-	const percentText = fg(percentColor, `${Math.round(w.usedPercent)}%`);
-	const labelText = fg("dim", w.label);
-	const resetText = w.resetsIn ? ` ${fg("dim", `⟳ ${w.resetsIn}`)}` : "";
-	return `${labelText} ${fg(percentColor, bar)} ${percentText}${resetText}`;
-}
-
 function renderCredits(credits: CodexCredits, fg: ThemeFg): string {
 	if (credits.unlimited) return fg("success", "Unlimited");
 	if (!credits.hasCredits) return fg("dim", "none");
@@ -329,21 +311,9 @@ function renderMonthlyLimit(limit: CodexMonthlyLimit, fg: ThemeFg): string {
 	return `${fg(percentColor, bar)} ${fg(percentColor, `${Math.round(limit.usedPercent)}%`)} ${fg("dim", amount)}${resetText}`;
 }
 
-function percentThemeColor(usedPercent: number): ThemeColorName {
-	return usedPercent >= 90 ? "error" : usedPercent >= 70 ? "warning" : "success";
-}
-
 function formatPlanType(value: string): string {
 	if (value.toLowerCase() === "prolite") return "Pro Lite";
 	return formatSnakeCase(value);
-}
-
-function formatSnakeCase(value: string): string {
-	return value
-		.split(/[_\s]+/)
-		.filter((part) => part.length > 0)
-		.map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-		.join(" ");
 }
 
 function formatAmount(raw: string): string {
@@ -351,23 +321,4 @@ function formatAmount(raw: string): string {
 	const asNumber = Number(trimmed);
 	if (!Number.isFinite(asNumber)) return trimmed;
 	return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(asNumber);
-}
-
-function pickObject(value: unknown, key: string): Record<string, unknown> | undefined {
-	const obj = isPlainObject(value) ? (value as Record<string, unknown>) : undefined;
-	if (!obj) return undefined;
-	const inner = obj[key];
-	return isPlainObject(inner) ? (inner as Record<string, unknown>) : undefined;
-}
-
-function isPlainObject(value: unknown): boolean {
-	return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function isFiniteNumber(value: unknown): value is number {
-	return typeof value === "number" && Number.isFinite(value);
-}
-
-function clampPercent(value: number): number {
-	return Math.max(0, Math.min(100, value));
 }

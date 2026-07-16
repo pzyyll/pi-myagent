@@ -2,7 +2,7 @@
 	"name": "@myagent/usage-bar",
 	"version": "0.1.0",
 	"private": true,
-	"description": "Footer usage bar for Codex subscription rate limits, shown only for the openai-codex provider.",
+	"description": "Footer usage bar and /usages details for Codex and SuperGrok subscription channels.",
 	"keywords": [
 		"pi-package",
 		"pi-extension"
