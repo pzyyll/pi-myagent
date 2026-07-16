@@ -2,12 +2,12 @@
 
 A Pi extension that shows subscription usage as a footer status bar and detailed `/usages` panel. It supports multiple channels behind one pipeline:
 
-| Channel | Provider id | Source |
-| ------- | ----------- | ------ |
-| **Codex** | `openai-codex` | `GET https://chatgpt.com/backend-api/wham/usage` |
-| **Grok** | `xai-supergrok` | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
+| Channel   | Provider id     | Source                                                          |
+| --------- | --------------- | --------------------------------------------------------------- |
+| **Codex** | `openai-codex`  | `GET https://chatgpt.com/backend-api/wham/usage`                |
+| **Grok**  | `xai-supergrok` | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
 
-The footer appears only while a matching model is active. `/usages` can query any configured channel even when another model is selected.
+The footer appears only while a matching model is active. `/usages` is independent of the current model: it opens a channel select list and queries the chosen channel on demand.
 
 ## What it shows
 
@@ -42,9 +42,9 @@ Bar color: green below 70%, yellow 70–89%, red at 90%+.
 
 ## Commands
 
-| Command   | Description |
-| --------- | ----------- |
-| `/usages` | Show detailed plan usage for the active matching model, or the first configured Codex/SuperGrok credentials if the current model is unrelated. |
+| Command   | Description                                                                                                                                                        |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/usages` | Open a select list of supported channels (Codex, SuperGrok) and show detailed plan usage for the chosen channel. Works regardless of the currently selected model. |
 
 On success it opens a dismissible detail panel (enter/esc) in TUI mode; otherwise it sends a plain-text summary notification.
 

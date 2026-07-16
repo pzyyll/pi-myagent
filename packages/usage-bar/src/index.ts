@@ -1,10 +1,11 @@
 // ABOUTME: Pi extension showing multi-channel subscription usage in footer and /usages.
-// ABOUTME: Polls the active provider channel (Codex or SuperGrok) while details stay on demand.
+// ABOUTME: Polls the active model channel; /usages lets you pick any supported channel.
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
 import {
+	CHANNELS,
 	findChannelForModel,
-	resolveChannelAndModel,
+	resolveModelForChannel,
 	type ChannelUsageView,
 	type ResolvedAuth,
 	type UsageChannel,
@@ -80,10 +81,7 @@ export default function (pi: ExtensionAPI) {
 		ctx: ExtensionContext,
 		channel: UsageChannel,
 		model: Model<any>,
-	): Promise<
-		| { ok: true; view: ChannelUsageView }
-		| { ok: false; error: string; aborted?: boolean }
-	> => {
+	): Promise<{ ok: true; view: ChannelUsageView } | { ok: false; error: string; aborted?: boolean }> => {
 		const gen = generation;
 		lastFetchAt = Date.now();
 		const authResult = await resolveAuth(ctx, model);
@@ -172,16 +170,34 @@ export default function (pi: ExtensionAPI) {
 		});
 	};
 
+	const pickChannel = async (ctx: ExtensionCommandContext): Promise<UsageChannel | undefined> => {
+		if (CHANNELS.length === 0) return undefined;
+		if (CHANNELS.length === 1) return CHANNELS[0];
+
+		if (!ctx.hasUI) {
+			ctx.ui.notify(`usage-bar: available channels: ${CHANNELS.map((channel) => channel.brand).join(", ")}`, "info");
+			return undefined;
+		}
+
+		const labels = CHANNELS.map((channel) => channel.brand);
+		const choice = await ctx.ui.select("Usage channel:", labels);
+		if (!choice) return undefined;
+		return CHANNELS.find((channel) => channel.brand === choice);
+	};
+
 	pi.registerCommand("usages", {
-		description: "Show plan usage details for the active Codex or SuperGrok channel",
+		description: "Pick a supported channel and show its plan usage details",
 		handler: async (_args, ctx) => {
-			const resolved = resolveChannelAndModel(ctx.model, ctx.modelRegistry.getAvailable());
-			if (!resolved) {
-				ctx.ui.notify("usage-bar: no Codex/SuperGrok usage credentials available", "info");
+			const channel = await pickChannel(ctx);
+			if (!channel) return;
+
+			const model = resolveModelForChannel(channel, ctx.modelRegistry.getAvailable(), ctx.model);
+			if (!model) {
+				ctx.ui.notify(`usage-bar: no credentials available for ${channel.brand}`, "info");
 				return;
 			}
 
-			const result = await fetchChannelUsage(ctx, resolved.channel, resolved.model);
+			const result = await fetchChannelUsage(ctx, channel, model);
 			if (!result.ok) {
 				if (!result.aborted) ctx.ui.notify(result.error, "warning");
 				return;

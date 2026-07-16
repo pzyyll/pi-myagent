@@ -1,4 +1,4 @@
-// ABOUTME: Registers usage channels and resolves the active one from model providers.
+// ABOUTME: Registers usage channels and resolves models for footer polling and /usages.
 // ABOUTME: Codex and SuperGrok share the same footer/command pipeline through this registry.
 import type { Model } from "@earendil-works/pi-ai";
 import { codexChannel } from "./codex";
@@ -18,18 +18,12 @@ export function findChannelForModel(model: Model<any> | undefined): UsageChannel
 	return findChannelByProvider(model?.provider);
 }
 
-/** Prefer the current model channel; otherwise the first available matching model. */
-export function resolveChannelAndModel(
-	current: Model<any> | undefined,
+/** Pick any configured model for a channel so /usages can query it off the active model. */
+export function resolveModelForChannel(
+	channel: UsageChannel,
 	available: readonly Model<any>[],
-): { channel: UsageChannel; model: Model<any> } | undefined {
-	const currentChannel = findChannelForModel(current);
-	if (current && currentChannel) {
-		return { channel: currentChannel, model: current };
-	}
-	for (const channel of CHANNELS) {
-		const model = available.find((candidate) => channel.matches(candidate.provider));
-		if (model) return { channel, model };
-	}
-	return undefined;
+	current?: Model<any>,
+): Model<any> | undefined {
+	if (current && channel.matches(current.provider)) return current;
+	return available.find((candidate) => channel.matches(candidate.provider));
 }
