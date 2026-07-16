@@ -7,7 +7,15 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { URLSearchParams } from "node:url";
 import type { Api, Model, OAuthCredentials, OAuthLoginCallbacks } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
-import { type CatalogModel, FALLBACK_CATALOG, fetchModelsCatalog, isRecord, sanitizeModelsCatalog } from "./catalog";
+import {
+	type CatalogModel,
+	FALLBACK_CATALOG,
+	fetchModelsCatalog,
+	isRecord,
+	peekJwtUserId,
+	sanitizeModelsCatalog,
+	thinkingLevelMapForCatalog,
+} from "./catalog";
 
 const CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828";
 // Resolve the installed grok CLI version so the proxy attributes requests to a
@@ -63,14 +71,19 @@ const DEVICE_CODE_SLOW_DOWN_INCREMENT_MS = 5_000;
 const DEVICE_CODE_DEFAULT_EXPIRES_MS = 5 * 60 * 1000;
 const OAUTH_POLLING_SAFETY_MARGIN_MS = 3_000;
 const ACCESS_TOKEN_REFRESH_SKEW_MS = 120_000;
-// OpenCode/xAI Responses sticky routing uses body prompt_cache_key, not OpenAI session_id / 24h retention.
-const PROMPT_CACHE_KEY_MAX_LENGTH = 64;
+// Align with grok-build Responses path (session OAuth → cli-chat-proxy):
+// - system role only (no developer)
+// - no OpenAI session_id header (sticky routing via x-grok-session-id)
+// - never body prompt_cache_key / prompt_cache_retention (grok leaves both unset)
 const XAI_RESPONSES_COMPAT = {
 	supportsDeveloperRole: false,
-	sendSessionIdHeader: false,
+	sessionAffinityFormat: "openai-nosession",
 	supportsLongCacheRetention: false,
-};
-const XAI_REASONING_LEVELS = { off: null, minimal: null } satisfies ProviderModelConfig["thinkingLevelMap"];
+} as const;
+const SESSION_ID_HEADER = "x-grok-session-id";
+const MODEL_OVERRIDE_HEADER = "x-grok-model-override";
+const USER_ID_HEADER = "x-grok-user-id";
+// Match grok-build legacy effort menu (low..xhigh); none/minimal not offered in UI.
 
 /** OAuth credentials plus the cached remote model catalog (Radius-style). */
 type SuperGrokCredentials = OAuthCredentials & {
@@ -314,25 +327,46 @@ async function refreshXaiToken(credentials: OAuthCredentials): Promise<OAuthCred
 	return attachModelsCatalog(refreshed, credentials);
 }
 
-function clampPromptCacheKey(key: string | undefined): string | undefined {
-	if (!key) return undefined;
-	const chars = Array.from(key);
-	if (chars.length <= PROMPT_CACHE_KEY_MAX_LENGTH) return key;
-	return chars.slice(0, PROMPT_CACHE_KEY_MAX_LENGTH).join("");
-}
-
-function withXaiPromptCache(payload: unknown, sessionId: string | undefined): unknown {
+/**
+ * Strip OpenAI-style cache fields pi-ai may inject.
+ * grok-build CreateResponse leaves prompt_cache_key / prompt_cache_retention as None
+ * and always sets reasoning.summary = concise (effort may be unset).
+ */
+export function alignGrokBuildResponsesPayload(payload: unknown): unknown {
 	if (!isRecord(payload)) return payload;
 
-	const promptCacheKey = clampPromptCacheKey(sessionId);
-	if (!promptCacheKey) return payload;
-
-	const next: Record<string, unknown> = {
-		...payload,
-		prompt_cache_key: promptCacheKey,
-	};
+	const next: Record<string, unknown> = { ...payload };
+	delete next.prompt_cache_key;
 	delete next.prompt_cache_retention;
+
+	// Match ConversationRequest → CreateResponse: always send reasoning with concise summary.
+	if (isRecord(next.reasoning)) {
+		next.reasoning = {
+			...next.reasoning,
+			summary: "concise",
+		};
+	} else {
+		next.reasoning = { summary: "concise" };
+	}
+
 	return next;
+}
+
+/** Product headers grok-build attaches on every sampling request. */
+export function applyGrokBuildProductHeaders(
+	headers: Record<string, string | null>,
+	opts: { sessionId?: string; modelId?: string; accessToken?: string },
+): void {
+	if (opts.sessionId) {
+		headers[SESSION_ID_HEADER] = opts.sessionId;
+	}
+	if (opts.modelId) {
+		headers[MODEL_OVERRIDE_HEADER] = opts.modelId;
+	}
+	if (opts.accessToken) {
+		const userId = peekJwtUserId(opts.accessToken);
+		if (userId) headers[USER_ID_HEADER] = userId;
+	}
 }
 
 function isCliChatProxyUrl(url: string | undefined): boolean {
@@ -353,7 +387,7 @@ function catalogModelFields(entry: CatalogModel) {
 		id: entry.id,
 		name: entry.name,
 		reasoning: entry.reasoning,
-		thinkingLevelMap: entry.reasoning ? XAI_REASONING_LEVELS : undefined,
+		thinkingLevelMap: thinkingLevelMapForCatalog(entry),
 		input: [...entry.input] as Array<"text" | "image">,
 		cost: { ...entry.cost },
 		contextWindow: entry.contextWindow,
@@ -444,13 +478,21 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("before_provider_request", (event, ctx) => {
 		if (ctx.model?.provider !== PROVIDER_ID) return;
-		return withXaiPromptCache(event.payload, ctx.sessionManager.getSessionId());
+		return alignGrokBuildResponsesPayload(event.payload);
 	});
 
 	pi.on("before_provider_headers", (event, ctx) => {
 		if (ctx.model?.provider !== PROVIDER_ID) return;
 		event.headers["x-grok-client-version"] = CLIENT_VERSION;
 		event.headers["x-grok-client-identifier"] = CLIENT_IDENTIFIER;
+
+		const cred = ctx.modelRegistry.authStorage.get(PROVIDER_ID);
+		const accessToken = cred?.type === "oauth" ? cred.access : undefined;
+		applyGrokBuildProductHeaders(event.headers, {
+			sessionId: ctx.sessionManager.getSessionId(),
+			modelId: ctx.model.id,
+			accessToken,
+		});
 
 		// cli-chat-proxy requires these product/auth attribution headers.
 		if (isCliChatProxyUrl(ctx.model.baseUrl)) {

@@ -1,11 +1,34 @@
 // ABOUTME: Fetches and parses the SuperGrok cli-chat-proxy /v1/models catalog.
 // ABOUTME: Mirrors grok-build session-auth model listing for OAuth credential storage.
 
+import { resolveXaiModelCost } from "./pricing";
+
+/** Canonical wire values for Responses `reasoning.effort` (grok-build ReasoningEffort). */
+export type ReasoningEffortWire = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+/**
+ * Built-in menu when supportsReasoningEffort but no server `reasoningEfforts` list.
+ * Matches grok-build `legacy_effort_options` (low..xhigh; none/minimal not offered).
+ */
+export const LEGACY_REASONING_EFFORTS: readonly ReasoningEffortWire[] = ["low", "medium", "high", "xhigh"];
+
+/** Pi thinkingLevelMap keys ↔ wire effort (off → none). */
+export type ThinkingLevelMap = {
+	off: string | null;
+	minimal: string | null;
+	low: string | null;
+	medium: string | null;
+	high: string | null;
+	xhigh: string | null;
+};
+
 /** Serializable model entry cached on OAuth credentials. */
 export interface CatalogModel {
 	id: string;
 	name: string;
 	reasoning: boolean;
+	/** Server menu values when present; omit → legacy low..xhigh when reasoning. */
+	reasoningEfforts?: ReasoningEffortWire[];
 	input: Array<"text" | "image">;
 	cost: {
 		input: number;
@@ -24,16 +47,17 @@ export const FALLBACK_CATALOG: CatalogModel[] = [
 		name: "Grok 4.5",
 		reasoning: true,
 		input: ["text", "image"],
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		cost: resolveXaiModelCost("grok-4.5"),
 		contextWindow: 500_000,
 		maxTokens: 128_000,
 	},
 	{
 		id: "grok-build",
 		name: "Grok Build",
-		reasoning: true,
+		// Grok Build client: supportsReasoningEffort=false; explicit effort can 400.
+		reasoning: false,
 		input: ["text", "image"],
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		cost: resolveXaiModelCost("grok-build"),
 		contextWindow: 500_000,
 		maxTokens: 128_000,
 	},
@@ -42,12 +66,7 @@ export const FALLBACK_CATALOG: CatalogModel[] = [
 /** Default context window when the remote entry omits it (grok-build DEFAULT_CONTEXT_WINDOW). */
 export const DEFAULT_CONTEXT_WINDOW = 256_000;
 
-const ZERO_COST: CatalogModel["cost"] = {
-	input: 0,
-	output: 0,
-	cacheRead: 0,
-	cacheWrite: 0,
-};
+export { ZERO_COST, resolveXaiModelCost } from "./pricing";
 
 export interface SessionAuthHeaders {
 	accessToken: string;
@@ -88,6 +107,75 @@ function firstBool(obj: Record<string, unknown>, ...keys: string[]): boolean | u
 		if (typeof value === "boolean") return value;
 	}
 	return undefined;
+}
+
+/** Canonical effort token; `max` is a CLI/UX alias of `xhigh` (grok-build). */
+export function parseReasoningEffortToken(token: string): ReasoningEffortWire | undefined {
+	switch (token.toLowerCase()) {
+		case "none":
+			return "none";
+		case "minimal":
+			return "minimal";
+		case "low":
+			return "low";
+		case "medium":
+			return "medium";
+		case "high":
+			return "high";
+		case "xhigh":
+		case "max":
+			return "xhigh";
+		default:
+			return undefined;
+	}
+}
+
+/**
+ * Parse grok-build `reasoningEfforts` array: bare strings or `{ value }` tables.
+ * Skips invalid entries (forward-compat). Returns undefined when empty/unusable.
+ */
+export function parseReasoningEffortOptions(raw: unknown): ReasoningEffortWire[] | undefined {
+	if (!Array.isArray(raw)) return undefined;
+	const out: ReasoningEffortWire[] = [];
+	const seen = new Set<ReasoningEffortWire>();
+	for (const el of raw) {
+		let token: string | undefined;
+		if (typeof el === "string") {
+			token = el;
+		} else if (isRecord(el) && typeof el.value === "string") {
+			token = el.value;
+		}
+		if (!token) continue;
+		const effort = parseReasoningEffortToken(token);
+		if (!effort || seen.has(effort)) continue;
+		seen.add(effort);
+		out.push(effort);
+	}
+	return out.length > 0 ? out : undefined;
+}
+
+/**
+ * Pi thinkingLevelMap for a model: offered efforts → wire string, else null.
+ * Absent/empty efforts use the legacy low..xhigh menu.
+ */
+export function buildThinkingLevelMap(
+	efforts: readonly ReasoningEffortWire[] = LEGACY_REASONING_EFFORTS,
+): ThinkingLevelMap {
+	const offered = new Set(efforts.length > 0 ? efforts : LEGACY_REASONING_EFFORTS);
+	return {
+		off: offered.has("none") ? "none" : null,
+		minimal: offered.has("minimal") ? "minimal" : null,
+		low: offered.has("low") ? "low" : null,
+		medium: offered.has("medium") ? "medium" : null,
+		high: offered.has("high") ? "high" : null,
+		xhigh: offered.has("xhigh") ? "xhigh" : null,
+	};
+}
+
+/** thinkingLevelMap for a catalog entry; undefined when effort is unsupported. */
+export function thinkingLevelMapForCatalog(entry: CatalogModel): ThinkingLevelMap | undefined {
+	if (!entry.reasoning) return undefined;
+	return buildThinkingLevelMap(entry.reasoningEfforts ?? LEGACY_REASONING_EFFORTS);
 }
 
 function decodeBase64UrlJson(segment: string): unknown {
@@ -138,12 +226,20 @@ export function parseRemoteModelEntry(value: unknown): CatalogModel | undefined 
 		(meta ? firstBool(meta, "supportsReasoningEffort", "supports_reasoning_effort") : undefined) ??
 		false;
 
+	const effortsRaw =
+		value.reasoningEfforts ??
+		value.reasoning_efforts ??
+		(meta ? (meta.reasoningEfforts ?? meta.reasoning_efforts) : undefined);
+	const reasoningEfforts = reasoning ? parseReasoningEffortOptions(effortsRaw) : undefined;
+
 	return {
 		id,
 		name,
 		reasoning,
+		...(reasoningEfforts ? { reasoningEfforts } : {}),
 		input: ["text", "image"],
-		cost: { ...ZERO_COST },
+		// Catalog has no unit prices; fill from official xAI docs prefab table.
+		cost: resolveXaiModelCost(id),
 		contextWindow,
 		maxTokens,
 	};
@@ -179,16 +275,24 @@ export function isCatalogModel(value: unknown): value is CatalogModel {
 /** Sanitize a modelsCatalog field loaded from auth.json. */
 export function sanitizeModelsCatalog(value: unknown): CatalogModel[] | undefined {
 	if (!Array.isArray(value)) return undefined;
-	const models = value.filter(isCatalogModel).map((m) => ({
-		...m,
-		input: m.input.filter((x): x is "text" | "image" => x === "text" || x === "image"),
-		cost: {
-			input: Number(m.cost.input) || 0,
-			output: Number(m.cost.output) || 0,
-			cacheRead: Number(m.cost.cacheRead) || 0,
-			cacheWrite: Number(m.cost.cacheWrite) || 0,
-		},
-	}));
+	const models = value.filter(isCatalogModel).map((m) => {
+		const reasoningEfforts = m.reasoning ? parseReasoningEffortOptions(m.reasoningEfforts) : undefined;
+		return {
+			id: m.id,
+			name: m.name,
+			reasoning: m.reasoning,
+			...(reasoningEfforts ? { reasoningEfforts } : {}),
+			input: m.input.filter((x): x is "text" | "image" => x === "text" || x === "image"),
+			cost: {
+				input: Number(m.cost.input) || 0,
+				output: Number(m.cost.output) || 0,
+				cacheRead: Number(m.cost.cacheRead) || 0,
+				cacheWrite: Number(m.cost.cacheWrite) || 0,
+			},
+			contextWindow: m.contextWindow,
+			maxTokens: m.maxTokens,
+		};
+	});
 	return models.length > 0 ? models : undefined;
 }
 

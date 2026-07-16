@@ -17,17 +17,40 @@ After login (and on token refresh / session start), the extension fetches the ac
 
 For API-key / BYOK usage, use the built-in `xai` provider and set `XAI_API_KEY` instead.
 
-## Prompt caching
+## Wire alignment with Grok Build (session OAuth)
 
-This extension aligns with OpenCode and the official xAI Responses API cache guidance:
+Requests use `api: "openai-responses"` against `cli-chat-proxy` and mirror grok-build's session path:
 
-- Uses `api: "openai-responses"` for SuperGrok models.
-- Explicitly sets body field `prompt_cache_key` to the current Pi session id on every request.
-- Clamps the key to 64 characters, matching Pi/OpenAI Responses limits.
-- Leaves OpenAI `session_id` header off (`sendSessionIdHeader: false`).
-- Leaves `prompt_cache_retention: "24h"` off (`supportsLongCacheRetention: false`) because xAI does not document long retention for this API.
+**Body (Responses)**
 
-Cache hits remain best-effort. Keep conversation prefixes stable across turns so xAI can reuse cached prompt prefixes.
+- Strips `prompt_cache_key` / `prompt_cache_retention` (grok-build leaves both `None`).
+- When `reasoning` is present, forces `summary: "concise"` (grok-build default).
+- System prompts use `system` role, not `developer` (`supportsDeveloperRole: false`).
+
+**Thinking / effort**
+
+- Models with `supportsReasoningEffort` get a Pi `thinkingLevelMap`:
+  - Server `reasoningEfforts` (if present) → only those wire values are selectable.
+  - Otherwise the grok-build legacy menu: `low` / `medium` / `high` / `xhigh` (`off` / `minimal` hidden).
+- Models without that flag (e.g. fallback `grok-build`) have no effort control — sending effort can 400 on the proxy.
+- Every Responses body gets `reasoning.summary = "concise"` even when effort is unset (grok-build CreateResponse shape).
+
+**Headers**
+
+- Product: `x-grok-client-version`, `x-grok-client-identifier`, `x-grok-session-id`, `x-grok-model-override`, and `x-grok-user-id` (JWT `sub` when available).
+- cli-chat-proxy auth attribution: `X-XAI-Token-Auth: xai-grok-cli`, `x-authenticateresponse`, `x-grok-client-mode`.
+- OpenAI `session_id` header is off (`sessionAffinityFormat: "openai-nosession"`). Sticky routing is via `x-grok-session-id`, not body cache keys.
+
+Prefix cache hits remain best-effort on the proxy/backend side; keep conversation prefixes stable across turns.
+
+## Usage cost display
+
+cli-chat-proxy model catalog has no unit prices. For Pi footer estimates this package fills `model.cost` from a prefab table:
+
+- Official Text API short-context rates (`docs.x.ai/developers/pricing`): e.g. `grok-4.5` $2 / $6 / cache $0.50, `grok-build` → `grok-build-0.1` $1 / $2 / cache $0.20.
+- Grok Build–only models missing from that table: e.g. `grok-composer-2.5-fast` $0.50 / $2.50 / cache $0.20 (product announcement / models.dev).
+
+Unknown ids stay $0. This is list-price estimation only — SuperGrok subscription billing is not the same as metered API.
 
 ## Limitations
 
@@ -35,4 +58,4 @@ Cache hits remain best-effort. Keep conversation prefixes stable across turns so
 - Existing logins without a cached catalog get one on the next session start or token refresh; run `/login xai-supergrok` if the list stays empty.
 - If refresh fails, run `/login xai-supergrok` again because xAI refresh tokens may rotate.
 - The login flow uses headless device-code OAuth; browser loopback OAuth is not exposed by Pi's current OAuth callback API.
-- Prompt caching is automatic on xAI's side; this extension only sets sticky routing via `prompt_cache_key`.
+- Not every grok-build sampler header is mirrored (`x-grok-conv-id`, `x-grok-req-id`, `x-grok-agent-id`, turn/deployment ids) — only the product headers needed for session affinity and proxy auth.

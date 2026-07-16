@@ -2,13 +2,18 @@
 // ABOUTME: Covers field aliases, hidden filtering, and JWT user id peeks.
 import { describe, expect, it } from "bun:test";
 import {
+	buildThinkingLevelMap,
 	DEFAULT_CONTEXT_WINDOW,
 	FALLBACK_CATALOG,
+	LEGACY_REASONING_EFFORTS,
 	modelsListUrl,
+	parseReasoningEffortOptions,
+	parseReasoningEffortToken,
 	parseRemoteModelEntry,
 	parseRemoteModels,
 	peekJwtUserId,
 	sanitizeModelsCatalog,
+	thinkingLevelMapForCatalog,
 } from "./catalog";
 
 describe("FALLBACK_CATALOG", () => {
@@ -18,6 +23,12 @@ describe("FALLBACK_CATALOG", () => {
 		expect(grok45?.name).toBe("Grok 4.5");
 		expect(grok45?.reasoning).toBe(true);
 		expect(grok45?.contextWindow).toBe(500_000);
+		expect(grok45?.cost).toEqual({ input: 2.0, output: 6.0, cacheRead: 0.5, cacheWrite: 0 });
+	});
+
+	it("marks grok-build as non-effort (supportsReasoningEffort false)", () => {
+		const grokBuild = FALLBACK_CATALOG.find((m) => m.id === "grok-build");
+		expect(grokBuild?.reasoning).toBe(false);
 	});
 });
 
@@ -36,10 +47,37 @@ describe("parseRemoteModelEntry", () => {
 			name: "Grok Build",
 			reasoning: true,
 			input: ["text", "image"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			// alias → official grok-build-0.1 short-context rates
+			cost: { input: 1.0, output: 2.0, cacheRead: 0.2, cacheWrite: 0 },
 			contextWindow: 500_000,
 			maxTokens: 64_000,
 		});
+		expect(model?.reasoningEfforts).toBeUndefined();
+	});
+
+	it("parses reasoningEfforts bare strings and value tables", () => {
+		const model = parseRemoteModelEntry({
+			id: "grok-4.5",
+			supportsReasoningEffort: true,
+			reasoningEfforts: [{ value: "max", id: "deep", label: "Deep" }, "low", { value: "bogus" }, 42],
+		});
+		expect(model?.reasoningEfforts).toEqual(["xhigh", "low"]);
+	});
+
+	it("reads reasoning_efforts from _meta and ignores when effort unsupported", () => {
+		const withMeta = parseRemoteModelEntry({
+			model: "m1",
+			supportsReasoningEffort: true,
+			_meta: { reasoning_efforts: ["high"] },
+		});
+		expect(withMeta?.reasoningEfforts).toEqual(["high"]);
+
+		const unsupported = parseRemoteModelEntry({
+			id: "m2",
+			supportsReasoningEffort: false,
+			reasoningEfforts: ["high"],
+		});
+		expect(unsupported?.reasoningEfforts).toBeUndefined();
 	});
 
 	it("accepts snake_case aliases and _meta fields", () => {
@@ -116,6 +154,62 @@ describe("sanitizeModelsCatalog", () => {
 		]);
 		expect(cleaned).toHaveLength(1);
 		expect(cleaned?.[0]?.id).toBe("x");
+	});
+
+	it("keeps valid reasoningEfforts and drops junk", () => {
+		const cleaned = sanitizeModelsCatalog([
+			{
+				id: "y",
+				name: "Y",
+				reasoning: true,
+				reasoningEfforts: ["high", "nope", "max"],
+				input: ["text"],
+				cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 10,
+				maxTokens: 5,
+			},
+		]);
+		expect(cleaned?.[0]?.reasoningEfforts).toEqual(["high", "xhigh"]);
+	});
+});
+
+describe("reasoning effort parsing / thinkingLevelMap", () => {
+	it("parseReasoningEffortToken accepts max as xhigh", () => {
+		expect(parseReasoningEffortToken("max")).toBe("xhigh");
+		expect(parseReasoningEffortToken("XHIGH")).toBe("xhigh");
+		expect(parseReasoningEffortToken("nope")).toBeUndefined();
+	});
+
+	it("parseReasoningEffortOptions skips invalid and dedupes", () => {
+		expect(parseReasoningEffortOptions(["high", "high", { value: "low" }, "bogus"])).toEqual(["high", "low"]);
+		expect(parseReasoningEffortOptions([])).toBeUndefined();
+		expect(parseReasoningEffortOptions("nope")).toBeUndefined();
+	});
+
+	it("buildThinkingLevelMap defaults to legacy low..xhigh", () => {
+		expect(buildThinkingLevelMap()).toEqual({
+			off: null,
+			minimal: null,
+			low: "low",
+			medium: "medium",
+			high: "high",
+			xhigh: "xhigh",
+		});
+		expect(LEGACY_REASONING_EFFORTS).toEqual(["low", "medium", "high", "xhigh"]);
+	});
+
+	it("thinkingLevelMapForCatalog is undefined without reasoning", () => {
+		expect(
+			thinkingLevelMapForCatalog({
+				id: "m",
+				name: "M",
+				reasoning: false,
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 1,
+				maxTokens: 1,
+			}),
+		).toBeUndefined();
 	});
 });
 

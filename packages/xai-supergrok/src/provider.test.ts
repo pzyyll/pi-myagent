@@ -1,8 +1,10 @@
-// ABOUTME: Tests SuperGrok provider seed models and oauth.modifyModels catalog swap.
-// ABOUTME: Covers Pi 0.80.7 non-empty models seed + remote catalog override boundaries.
+// ABOUTME: Tests SuperGrok provider seed models, catalog swap, and grok-build wire alignment.
+// ABOUTME: Covers Responses body strip, product headers, and oauth.modifyModels boundaries.
 import { describe, expect, it } from "bun:test";
 import type { Api, Model, OAuthCredentials } from "@earendil-works/pi-ai";
 import {
+	alignGrokBuildResponsesPayload,
+	applyGrokBuildProductHeaders,
 	catalogToModel,
 	catalogToProviderModelConfig,
 	FALLBACK_CATALOG,
@@ -59,10 +61,45 @@ describe("SEED_MODELS (Pi registerProvider seed)", () => {
 		// Shared compat / reasoning map from catalog conversion helpers
 		expect(grok45?.compat).toEqual({
 			supportsDeveloperRole: false,
-			sendSessionIdHeader: false,
+			sessionAffinityFormat: "openai-nosession",
 			supportsLongCacheRetention: false,
 		});
-		expect(grok45?.thinkingLevelMap).toEqual({ off: null, minimal: null });
+		// Legacy menu when catalog omits reasoningEfforts (low..xhigh).
+		expect(grok45?.thinkingLevelMap).toEqual({
+			off: null,
+			minimal: null,
+			low: "low",
+			medium: "medium",
+			high: "high",
+			xhigh: "xhigh",
+		});
+	});
+
+	it("projects server reasoningEfforts into thinkingLevelMap", () => {
+		const model = catalogToModel({
+			id: "custom",
+			name: "Custom",
+			reasoning: true,
+			reasoningEfforts: ["high", "xhigh"],
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1000,
+			maxTokens: 500,
+		});
+		expect(model.thinkingLevelMap).toEqual({
+			off: null,
+			minimal: null,
+			low: null,
+			medium: null,
+			high: "high",
+			xhigh: "xhigh",
+		});
+	});
+
+	it("omits thinkingLevelMap for grok-build (no supportsReasoningEffort)", () => {
+		const grokBuild = SEED_MODELS.find((m) => m.id === "grok-build");
+		expect(grokBuild?.reasoning).toBe(false);
+		expect(grokBuild?.thinkingLevelMap).toBeUndefined();
 	});
 
 	it("mirrors FALLBACK_CATALOG ids (single source of truth)", () => {
@@ -158,5 +195,65 @@ describe("modifyXaiModelsForOAuth (credential catalog vs seed)", () => {
 		expect(result.filter((m) => m.provider === PROVIDER_ID).map((m) => m.id)).toEqual(
 			FALLBACK_CATALOG.map((m) => m.id),
 		);
+	});
+});
+
+describe("alignGrokBuildResponsesPayload (body wire)", () => {
+	it("strips prompt_cache_key and prompt_cache_retention (grok leaves both unset)", () => {
+		const aligned = alignGrokBuildResponsesPayload({
+			model: "grok-build",
+			prompt_cache_key: "session-abc",
+			prompt_cache_retention: "24h",
+			store: false,
+		}) as Record<string, unknown>;
+
+		expect(aligned.model).toBe("grok-build");
+		expect(aligned.store).toBe(false);
+		expect("prompt_cache_key" in aligned).toBe(false);
+		expect("prompt_cache_retention" in aligned).toBe(false);
+	});
+
+	it("forces reasoning.summary to concise when reasoning is present", () => {
+		const aligned = alignGrokBuildResponsesPayload({
+			reasoning: { effort: "high", summary: "auto" },
+		}) as { reasoning: { effort: string; summary: string } };
+
+		expect(aligned.reasoning).toEqual({ effort: "high", summary: "concise" });
+	});
+
+	it("injects reasoning.summary=concise when effort/reasoning is absent", () => {
+		const aligned = alignGrokBuildResponsesPayload({
+			model: "grok-build",
+		}) as { reasoning: { summary: string; effort?: string } };
+
+		expect(aligned.reasoning).toEqual({ summary: "concise" });
+		expect(aligned.reasoning.effort).toBeUndefined();
+	});
+
+	it("leaves non-object payloads untouched", () => {
+		expect(alignGrokBuildResponsesPayload(null)).toBe(null);
+		expect(alignGrokBuildResponsesPayload("x")).toBe("x");
+	});
+});
+
+describe("applyGrokBuildProductHeaders", () => {
+	it("sets session-id and model-override product headers", () => {
+		const headers: Record<string, string | null> = {};
+		applyGrokBuildProductHeaders(headers, {
+			sessionId: "sess-1",
+			modelId: "grok-4.5",
+		});
+		expect(headers["x-grok-session-id"]).toBe("sess-1");
+		expect(headers["x-grok-model-override"]).toBe("grok-4.5");
+		expect(headers["x-grok-user-id"]).toBeUndefined();
+	});
+
+	it("peeks JWT sub into x-grok-user-id when access token is present", () => {
+		// header.payload.sig — payload is {"sub":"user-42"} base64url
+		const payload = Buffer.from(JSON.stringify({ sub: "user-42" })).toString("base64url");
+		const token = `aaa.${payload}.bbb`;
+		const headers: Record<string, string | null> = {};
+		applyGrokBuildProductHeaders(headers, { accessToken: token });
+		expect(headers["x-grok-user-id"]).toBe("user-42");
 	});
 });
