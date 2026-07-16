@@ -1,7 +1,9 @@
 // ABOUTME: Pi extension showing multi-channel subscription usage in footer and /usages.
 // ABOUTME: Polls the active model channel; /usages lets you pick any supported channel.
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
+import { Container, Text } from "@earendil-works/pi-tui";
 import {
 	CHANNELS,
 	findChannelForModel,
@@ -157,10 +159,20 @@ export default function (pi: ExtensionAPI) {
 
 		await ctx.ui.custom((_tui, theme, keybindings, done) => {
 			const footer = theme.fg("dim", "Press enter or esc to close");
-			const rendered = [...lines, "", footer];
+			const border = (s: string) => theme.fg("border", s);
+
+			const container = new Container();
+			container.addChild(new DynamicBorder(border));
+			for (const line of lines) {
+				container.addChild(new Text(line, 0, 0));
+			}
+			container.addChild(new Text("", 0, 0));
+			container.addChild(new Text(footer, 0, 0));
+			container.addChild(new DynamicBorder(border));
+
 			return {
-				render: () => rendered,
-				invalidate: () => {},
+				render: (w) => container.render(w),
+				invalidate: () => container.invalidate(),
 				handleInput: (data: string) => {
 					if (keybindings.matches(data, "tui.select.cancel") || keybindings.matches(data, "tui.select.confirm")) {
 						done(undefined);
