@@ -1,10 +1,10 @@
-// ABOUTME: Tests SuperGrok provider seed models, catalog swap, and grok-build wire alignment.
-// ABOUTME: Covers Responses body strip, product headers, and oauth.modifyModels boundaries.
+// ABOUTME: Tests SuperGrok provider seed models, catalog refresh, and grok-build wire alignment.
+// ABOUTME: Covers Responses body strip, product headers, and Pi 0.80.8 refreshModels boundaries.
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Api, Model, OAuthCredentials } from "@earendil-works/pi-ai";
+import type { OAuthCredentials, RefreshModelsContext } from "@earendil-works/pi-ai";
 import {
 	alignGrokBuildResponsesPayload,
 	applyGrokBuildProductHeaders,
@@ -12,30 +12,41 @@ import {
 	catalogToProviderModelConfig,
 	credentialsWithoutModelsCatalog,
 	FALLBACK_CATALOG,
-	modifyXaiModelsForOAuth,
+	modelsFromDiskOrFallback,
 	PROVIDER_ID,
+	refreshXaiModels,
 	SEED_MODELS,
 } from "./index";
 import type { CatalogModel } from "./catalog";
 import { saveModelsCatalogToCache } from "./models-cache";
 import { grokModelsCachePath } from "./paths";
 
-function seedAsRegistryModels(): Model<Api>[] {
-	// Mirrors applyProviderConfig: ProviderModelConfig → Model with provider/baseUrl/api filled in.
-	return SEED_MODELS.map((cfg) => ({
-		id: cfg.id,
-		name: cfg.name,
-		api: "openai-responses" as const,
-		provider: PROVIDER_ID,
-		baseUrl: "https://cli-chat-proxy.grok.com/v1",
-		reasoning: cfg.reasoning,
-		thinkingLevelMap: cfg.thinkingLevelMap,
-		input: cfg.input,
-		cost: cfg.cost,
-		contextWindow: cfg.contextWindow,
-		maxTokens: cfg.maxTokens,
-		compat: cfg.compat,
-	}));
+function offlineRefreshContext(): RefreshModelsContext {
+	return {
+		allowNetwork: false,
+		store: {
+			read: async () => undefined,
+			write: async () => {},
+			delete: async () => {},
+		},
+	};
+}
+
+function onlineOAuthContext(access = "access-token"): RefreshModelsContext {
+	return {
+		allowNetwork: true,
+		credential: {
+			type: "oauth",
+			access,
+			refresh: "refresh-token",
+			expires: Date.now() + 3_600_000,
+		},
+		store: {
+			read: async () => undefined,
+			write: async () => {},
+			delete: async () => {},
+		},
+	};
 }
 
 function oauthCreds(): OAuthCredentials {
@@ -47,8 +58,7 @@ function oauthCreds(): OAuthCredentials {
 }
 
 describe("SEED_MODELS (Pi registerProvider seed)", () => {
-	it("is non-empty so Pi 0.80.7 enters the models + modifyModels branch", () => {
-		// applyProviderConfig only registers models / calls modifyModels when models.length > 0
+	it("is non-empty so cold start has models before refreshModels", () => {
 		expect(SEED_MODELS.length).toBeGreaterThan(0);
 	});
 
@@ -63,7 +73,6 @@ describe("SEED_MODELS (Pi registerProvider seed)", () => {
 			maxTokens: 128_000,
 			input: ["text", "image"],
 		});
-		// Shared compat / reasoning map from catalog conversion helpers
 		expect(grok45?.compat).toEqual({
 			supportsDeveloperRole: false,
 			sessionAffinityFormat: "openai-nosession",
@@ -151,8 +160,7 @@ describe("SEED_MODELS (Pi registerProvider seed)", () => {
 	});
 });
 
-describe("modifyXaiModelsForOAuth (credential catalog vs seed)", () => {
-	// Isolate from real ~/.pi/agent/grok_models_cache.json and ~/.grok/models_cache.json.
+describe("modelsFromDiskOrFallback + refreshXaiModels (Pi 0.80.8)", () => {
 	let prevGrokHome: string | undefined;
 	let prevAgentDir: string | undefined;
 	let tempHome: string;
@@ -173,33 +181,13 @@ describe("modifyXaiModelsForOAuth (credential catalog vs seed)", () => {
 		rmSync(tempHome, { recursive: true, force: true });
 	});
 
-	it("keeps FALLBACK / seed models when credentials have no remote catalog", () => {
-		const seed = seedAsRegistryModels();
-		const other: Model<Api> = {
-			id: "other-model",
-			name: "Other",
-			api: "openai-responses",
-			provider: "other-provider",
-			baseUrl: "https://example.com",
-			reasoning: false,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 1000,
-			maxTokens: 500,
-		};
-
-		const result = modifyXaiModelsForOAuth([other, ...seed], oauthCreds());
-		const ours = result.filter((m) => m.provider === PROVIDER_ID);
-		const others = result.filter((m) => m.provider !== PROVIDER_ID);
-
-		expect(others.map((m) => m.id)).toEqual(["other-model"]);
-		expect(ours.map((m) => m.id)).toEqual(FALLBACK_CATALOG.map((m) => m.id));
-		expect(ours.map((m) => m.id)).toContain("grok-4.5");
-		expect(ours.every((m) => m.baseUrl === "https://cli-chat-proxy.grok.com/v1")).toBe(true);
+	it("returns FALLBACK seed when disk cache is empty", () => {
+		const models = modelsFromDiskOrFallback();
+		expect(models.map((m) => m.id)).toEqual(FALLBACK_CATALOG.map((m) => m.id));
+		expect(models.every((m) => m.id.length > 0)).toBe(true);
 	});
 
-	it("replaces seed with disk-cached ModelsCatalog (not credentials)", () => {
-		const seed = seedAsRegistryModels();
+	it("projects disk-cached ModelsCatalog (not credentials)", () => {
 		const remote: CatalogModel[] = [
 			{
 				id: "remote-only",
@@ -227,28 +215,48 @@ describe("modifyXaiModelsForOAuth (credential catalog vs seed)", () => {
 			path: grokModelsCachePath(),
 		});
 
-		// Even if credentials carry a legacy modelsCatalog, disk cache wins and auth field is ignored.
-		const creds = {
-			...oauthCreds(),
-			modelsCatalog: [{ id: "should-not-appear" }],
-		} as OAuthCredentials;
-		const result = modifyXaiModelsForOAuth(seed, creds);
-		const ours = result.filter((m) => m.provider === PROVIDER_ID);
-
-		expect(ours.map((m) => m.id)).toEqual(["remote-only", "grok-4.5"]);
-		expect(ours.map((m) => m.id)).not.toContain("grok-build");
-		expect(ours.map((m) => m.id)).not.toContain("should-not-appear");
-		expect(ours.find((m) => m.id === "grok-4.5")?.name).toBe("Grok 4.5 (entitled)");
-		expect(ours.find((m) => m.id === "grok-4.5")?.maxTokens).toBe(64_000);
-		expect(ours.find((m) => m.id === "remote-only")?.contextWindow).toBe(42_000);
+		const models = modelsFromDiskOrFallback();
+		expect(models.map((m) => m.id)).toEqual(["remote-only", "grok-4.5"]);
+		expect(models.map((m) => m.id)).not.toContain("grok-build");
+		expect(models.find((m) => m.id === "grok-4.5")?.name).toBe("Grok 4.5 (entitled)");
+		expect(models.find((m) => m.id === "grok-4.5")?.maxTokens).toBe(64_000);
+		expect(models.find((m) => m.id === "remote-only")?.contextWindow).toBe(42_000);
 	});
 
-	it("falls back to FALLBACK_CATALOG when disk cache is empty", () => {
-		const seed = seedAsRegistryModels();
-		const result = modifyXaiModelsForOAuth(seed, oauthCreds());
-		expect(result.filter((m) => m.provider === PROVIDER_ID).map((m) => m.id)).toEqual(
-			FALLBACK_CATALOG.map((m) => m.id),
-		);
+	it("offline refreshModels returns disk/fallback without network", async () => {
+		const models = await refreshXaiModels(offlineRefreshContext());
+		expect(models.map((m) => m.id)).toEqual(FALLBACK_CATALOG.map((m) => m.id));
+	});
+
+	it("online refreshModels without oauth credential stays on disk/fallback", async () => {
+		const models = await refreshXaiModels({
+			allowNetwork: true,
+			store: offlineRefreshContext().store,
+		});
+		expect(models.map((m) => m.id)).toEqual(FALLBACK_CATALOG.map((m) => m.id));
+	});
+
+	it("online refreshModels with oauth uses disk cache when network fetch fails", async () => {
+		const remote: CatalogModel[] = [
+			{
+				id: "cached-only",
+				name: "Cached Only",
+				reasoning: false,
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 10_000,
+				maxTokens: 1_000,
+			},
+		];
+		saveModelsCatalogToCache(remote, {
+			origin: "https://cli-chat-proxy.grok.com/v1/models",
+			authMethod: "session",
+			path: grokModelsCachePath(),
+		});
+
+		// Invalid token → fetch fails → disk cache preserved.
+		const models = await refreshXaiModels(onlineOAuthContext("not-a-real-token"));
+		expect(models.map((m) => m.id)).toEqual(["cached-only"]);
 	});
 
 	it("strips modelsCatalog from OAuth credentials for auth.json storage", () => {
@@ -325,7 +333,6 @@ describe("applyGrokBuildProductHeaders", () => {
 	});
 
 	it("peeks JWT sub into x-grok-user-id when access token is present", () => {
-		// header.payload.sig — payload is {"sub":"user-42"} base64url
 		const payload = Buffer.from(JSON.stringify({ sub: "user-42" })).toString("base64url");
 		const token = `aaa.${payload}.bbb`;
 		const headers: Record<string, string | null> = {};

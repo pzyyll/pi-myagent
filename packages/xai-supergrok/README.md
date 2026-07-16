@@ -1,8 +1,17 @@
 # xAI SuperGrok OAuth
 
-Registers a dedicated **`xai-supergrok`** provider for SuperGrok / X Premium **subscription OAuth**.
+Registers a dedicated **`xai-supergrok`** provider for SuperGrok / X Premium **subscription OAuth** over **cli-chat-proxy** (Grok Build session path).
 
-This is intentionally separate from Pi's built-in **`xai`** provider, which stays on the public API-key path (`XAI_API_KEY`).
+This is intentionally separate from Pi's built-in **`xai`** provider:
+
+|                 | Built-in `xai`                                      | This package `xai-supergrok`                          |
+| --------------- | --------------------------------------------------- | ----------------------------------------------------- |
+| Auth            | `XAI_API_KEY` and/or Pi device-code OAuth (0.80.8+) | SuperGrok session OAuth (+ optional `~/.grok` import) |
+| Endpoint        | `https://api.x.ai/v1`                               | `https://cli-chat-proxy.grok.com/v1`                  |
+| Models          | Static built-in catalog                             | Dynamic entitlements via `/v1/models`                 |
+| Product headers | None                                                | grok-shell / cli-chat-proxy attribution               |
+
+Requires **Pi ≥ 0.80.8** (`refreshModels`, `readStoredCredential`).
 
 ## Usage
 
@@ -31,12 +40,11 @@ Import is a snapshot copy, not a live link.
 
 ### Models catalog (`~/.pi/agent/grok_models_cache.json`)
 
-After login (and on token refresh / session start), the extension fetches
-`GET https://cli-chat-proxy.grok.com/v1/models` with the same session-auth headers as Grok Build (`Authorization`, `X-XAI-Token-Auth: xai-grok-cli`, client version/identifier).
+Pi 0.80.8 drives discovery through provider **`refreshModels`** (register offline pass, `/model` background refresh, `pi update --models`). When network is allowed and SuperGrok OAuth is present, the extension fetches `GET https://cli-chat-proxy.grok.com/v1/models` with the same session-auth headers as Grok Build (`Authorization`, `X-XAI-Token-Auth: xai-grok-cli`, client version/identifier). Login and token refresh also warm the cache.
 
 The catalog is saved **only** as **`~/.pi/agent/grok_models_cache.json`** (Pi agent dir; override with `PI_CODING_AGENT_DIR`). It is **not** stored on OAuth credentials in `~/.pi/agent/auth.json` — that file stays token-only. Grok Build keeps its own `~/.grok/models_cache.json` (warm-start when the Pi cache is missing). Shape matches that cache (`fetched_at`, `auth_method`, `origin`, `etag`, `models` map). If the proxy is unreachable and no cache exists, it falls back to `grok-4.5` and `grok-build`.
 
-For API-key / BYOK usage, use the built-in `xai` provider and set `XAI_API_KEY` instead.
+For public API-key / BYOK (or Pi's built-in xAI subscription against `api.x.ai`), use the built-in `xai` provider instead.
 
 ## Wire alignment with Grok Build (session OAuth)
 
@@ -78,7 +86,7 @@ Unknown ids stay $0. This is list-price estimation only — SuperGrok subscripti
 ## Limitations
 
 - Model availability is whatever cli-chat-proxy returns for your SuperGrok/X Premium entitlements (not a static list in this package).
-- Existing logins without a cached catalog get one on the next session start or token refresh; run `/login xai-supergrok` if the list stays empty.
+- Existing logins without a cached catalog get one on the next `/model` refresh, `pi update --models`, or token refresh; run `/login xai-supergrok` if the list stays empty.
 - If refresh fails, run `/login xai-supergrok` (or re-import / re-OAuth) again because xAI refresh tokens may rotate.
 - Importing from `~/.grok/auth.json` copies tokens into Pi at that moment only. Later Grok Build rotations are **not** auto-adopted; re-run `/login` and choose import again if needed.
 - The login flow uses headless device-code OAuth; browser loopback OAuth is not exposed by Pi's current OAuth callback API.

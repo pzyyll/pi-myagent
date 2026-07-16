@@ -1,10 +1,10 @@
-// ABOUTME: Registers a SuperGrok subscription OAuth provider separate from built-in xAI API keys.
-// ABOUTME: Pi owns auth in ~/.pi/agent/auth.json; ~/.grok/auth.json is optional manual import only.
+// ABOUTME: Registers SuperGrok subscription OAuth via cli-chat-proxy, separate from built-in xai.
+// ABOUTME: Pi 0.80.8+ refreshModels + readStoredCredential; auth stays in ~/.pi/agent/auth.json.
 import { execFileSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { URLSearchParams } from "node:url";
-import type { Api, Model, OAuthCredentials, OAuthLoginCallbacks } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
+import type { Api, Model, OAuthCredentials, OAuthLoginCallbacks, RefreshModelsContext } from "@earendil-works/pi-ai";
+import { type ExtensionAPI, type ProviderModelConfig, readStoredCredential } from "@earendil-works/pi-coding-agent";
 import {
 	type CatalogModel,
 	FALLBACK_CATALOG,
@@ -499,7 +499,7 @@ function isCliChatProxyUrl(url: string | undefined): boolean {
 
 /**
  * Shared catalog → model field mapping (compat + reasoning levels).
- * Used for both registry seed configs and oauth.modifyModels Model objects.
+ * Used for seed configs, refreshModels, and full Model objects.
  */
 function catalogModelFields(entry: CatalogModel) {
 	return {
@@ -515,12 +515,12 @@ function catalogModelFields(entry: CatalogModel) {
 	};
 }
 
-/** ProviderModelConfig seed entry so Pi 0.80.7 enters the models + modifyModels path. */
+/** ProviderModelConfig seed / refreshModels entry from a CatalogModel. */
 export function catalogToProviderModelConfig(entry: CatalogModel): ProviderModelConfig {
 	return catalogModelFields(entry);
 }
 
-/** Full Model used by oauth.modifyModels when swapping in the credential catalog. */
+/** Full Model for tests and callers that need provider/baseUrl/api filled in. */
 export function catalogToModel(entry: CatalogModel): Model<Api> {
 	return {
 		...catalogModelFields(entry),
@@ -532,89 +532,69 @@ export function catalogToModel(entry: CatalogModel): Model<Api> {
 
 /**
  * Non-empty seed from FALLBACK_CATALOG.
- * Pi skips oauth.modifyModels when registerProvider is given models: [] (0.80.7
- * applyProviderConfig only runs the models + modifyModels branch when length > 0).
- * Disk cache / remote catalog replaces this seed via modifyModels.
+ * Cold-start list before Pi runs refreshModels; disk/remote catalog replaces it.
  */
 export const SEED_MODELS: ProviderModelConfig[] = FALLBACK_CATALOG.map(catalogToProviderModelConfig);
 
-/**
- * Replace this provider's models with the disk-cached remote catalog.
- * Mirrors Radius gateway OAuth, but catalog lives in ~/.pi/agent/grok_models_cache.json.
- * Falls back to FALLBACK_CATALOG when the cache is empty/unavailable.
- */
-export function modifyXaiModelsForOAuth(models: Model<Api>[], credentials: OAuthCredentials): Model<Api>[] {
-	void credentials; // Pi oauth.modifyModels signature; ModelsCatalog is disk-only.
-	const others = models.filter((model) => model.provider !== PROVIDER_ID);
+/** Disk cache or FALLBACK_CATALOG as ProviderModelConfig[] for this provider only. */
+export function modelsFromDiskOrFallback(): ProviderModelConfig[] {
 	const catalog = getModelsCatalog() ?? FALLBACK_CATALOG;
-	return [...others, ...catalog.map(catalogToModel)];
+	return catalog.map(catalogToProviderModelConfig);
+}
+
+/**
+ * Pi 0.80.8+ dynamic catalog discovery.
+ * Offline / no OAuth: disk cache or FALLBACK_CATALOG.
+ * Online + OAuth: fetch cli-chat-proxy /v1/models into ~/.pi/agent/grok_models_cache.json.
+ */
+export async function refreshXaiModels(context: RefreshModelsContext): Promise<ProviderModelConfig[]> {
+	if (!context.allowNetwork) {
+		return modelsFromDiskOrFallback();
+	}
+
+	const credential = context.credential;
+	if (!credential || credential.type !== "oauth" || !credential.access) {
+		return modelsFromDiskOrFallback();
+	}
+
+	try {
+		await refreshModelsCache(credentialsWithoutModelsCatalog(credential), context.signal);
+	} catch {
+		// Keep disk cache / fallback.
+	}
+	return modelsFromDiskOrFallback();
+}
+
+/** Sync read of stored OAuth access token for product headers (no AuthStorage API). */
+export function storedAccessToken(): string | undefined {
+	const cred = readStoredCredential(PROVIDER_ID);
+	if (cred?.type === "oauth" && typeof cred.access === "string" && cred.access.length > 0) {
+		return cred.access;
+	}
+	return undefined;
 }
 
 export { PROVIDER_ID, FALLBACK_CATALOG, OIDC_ISSUER, OIDC_CLIENT_ID };
 
-function storeProviderOAuth(ctx: ExtensionContext, credentials: OAuthCredentials): void {
-	ctx.modelRegistry.authStorage.set(PROVIDER_ID, {
-		...credentialsWithoutModelsCatalog(credentials),
-		type: "oauth",
-	});
-}
-
-/** Drop legacy modelsCatalog blobs from Pi auth.json (catalog is disk-cache only). */
-function stripLegacyModelsCatalog(ctx: ExtensionContext): boolean {
-	const existing = ctx.modelRegistry.authStorage.get(PROVIDER_ID);
-	if (existing?.type !== "oauth") return false;
-	if (!Object.prototype.hasOwnProperty.call(existing, "modelsCatalog")) return false;
-	storeProviderOAuth(ctx, existing);
-	return true;
-}
-
-/** Background refresh so disk cache / entitlements stay current. */
-async function refreshCatalogInBackground(ctx: ExtensionContext): Promise<void> {
-	const cred = ctx.modelRegistry.authStorage.get(PROVIDER_ID);
-	if (!cred || cred.type !== "oauth") return;
-
-	const before = getModelsCatalog()?.map((m) => m.id) ?? [];
-
-	try {
-		if (Object.prototype.hasOwnProperty.call(cred, "modelsCatalog")) {
-			storeProviderOAuth(ctx, cred);
-		}
-		await refreshModelsCache(cred);
-		const after = getModelsCatalog()?.map((m) => m.id) ?? [];
-		const changed = JSON.stringify(before) !== JSON.stringify(after);
-		if (changed || before.length === 0) {
-			ctx.modelRegistry.refresh();
-		}
-	} catch {
-		// Keep whatever catalog/fallback is already on disk.
-	}
-}
-
 export default function (pi: ExtensionAPI) {
 	pi.registerProvider(PROVIDER_ID, {
 		name: "xAI SuperGrok",
-		// Subscription OAuth only — does not share credentials with built-in `xai` / XAI_API_KEY.
+		// Subscription OAuth only — separate from built-in `xai` (api.x.ai + optional Pi OAuth).
 		baseUrl: CLI_CHAT_PROXY_BASE_URL,
 		api: "openai-responses",
-		// Non-empty seed required so Pi 0.80.7 runs models registration + oauth.modifyModels.
-		// Disk-cached remote catalog replaces the seed; FALLBACK_CATALOG if none/unavailable.
+		// Seed for cold start; refreshModels replaces with disk/remote entitlements.
 		models: SEED_MODELS,
+		refreshModels: refreshXaiModels,
 		oauth: {
 			name: "xAI SuperGrok (Subscription OAuth)",
 			login: loginXai,
 			refreshToken: refreshXaiToken,
 			getApiKey: (credentials) => credentials.access,
-			modifyModels: modifyXaiModelsForOAuth,
 		},
 	});
 
-	// No auto-import of ~/.grok/auth.json — use /login xai-supergrok to import or OAuth.
-	pi.on("session_start", (_event, ctx) => {
-		if (stripLegacyModelsCatalog(ctx)) {
-			ctx.modelRegistry.refresh();
-		}
-		void refreshCatalogInBackground(ctx);
-	});
+	// Catalog refresh is owned by Pi (register offline refresh, /model, pi update --models).
+	// Login/token refresh still warm ~/.pi/agent/grok_models_cache.json.
 
 	pi.on("before_provider_request", (event, ctx) => {
 		if (ctx.model?.provider !== PROVIDER_ID) return;
@@ -626,12 +606,10 @@ export default function (pi: ExtensionAPI) {
 		event.headers["x-grok-client-version"] = CLIENT_VERSION;
 		event.headers["x-grok-client-identifier"] = CLIENT_IDENTIFIER;
 
-		const cred = ctx.modelRegistry.authStorage.get(PROVIDER_ID);
-		const accessToken = cred?.type === "oauth" ? cred.access : undefined;
 		applyGrokBuildProductHeaders(event.headers, {
 			sessionId: ctx.sessionManager.getSessionId(),
 			modelId: ctx.model.id,
-			accessToken,
+			accessToken: storedAccessToken(),
 		});
 
 		// cli-chat-proxy requires these product/auth attribution headers.
