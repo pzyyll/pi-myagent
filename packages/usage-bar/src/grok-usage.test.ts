@@ -1,5 +1,5 @@
 // ABOUTME: Tests SuperGrok billing payload parsing and footer/detail rendering.
-// ABOUTME: Covers credits percent, period labels, prepaid/on-demand, and legacy fields.
+// ABOUTME: Covers credits, productUsage breakdown, prepaid/on-demand, and legacy fields.
 import { describe, expect, it } from "bun:test";
 import { parseGrokPlanUsage, renderGrokPlanUsageDetails, renderGrokUsage } from "./grok-usage";
 import type { ThemeColorName } from "./shared";
@@ -91,6 +91,42 @@ describe("parseGrokPlanUsage", () => {
 		expect(u.usable).toBe(true);
 		expect(u.windows).toHaveLength(0);
 	});
+
+	it("parses productUsage breakdown and sorts by usage desc", () => {
+		const u = parseGrokPlanUsage(
+			creditsPayload({
+				creditUsagePercent: 42.5,
+				productUsage: [
+					{ product: "PRODUCT_API", usagePercent: 12.3 },
+					{ product: "PRODUCT_GROK_BUILD", usagePercent: 61.2 },
+					{ product: "PRODUCT_CHAT", usage_percent: 8 },
+					{ product: "PRODUCT_IMAGINE", usagePercent: 150 },
+					{ label: "Voice", usagePercent: 3.1 },
+					{ product: "PRODUCT_SKIP_ME" },
+				],
+			}),
+			NOW,
+		);
+		expect(u.productUsage.map((p) => ({ label: p.label, pct: p.usagePct }))).toEqual([
+			{ label: "Imagine", pct: 100 },
+			{ label: "Build", pct: 61.2 },
+			{ label: "API", pct: 12.3 },
+			{ label: "Chat", pct: 8 },
+			{ label: "Voice", pct: 3.1 },
+		]);
+		expect(u.productUsage[1]?.product).toBe("PRODUCT_GROK_BUILD");
+	});
+
+	it("is usable when only productUsage is present", () => {
+		const u = parseGrokPlanUsage(
+			creditsPayload({
+				product_usage: [{ product: "PRODUCT_GROK_BUILD", usage_percent: 10 }],
+			}),
+			NOW,
+		);
+		expect(u.usable).toBe(true);
+		expect(u.productUsage).toEqual([{ label: "Build", product: "PRODUCT_GROK_BUILD", usagePct: 10 }]);
+	});
 });
 
 describe("renderGrokUsage", () => {
@@ -149,6 +185,24 @@ describe("renderGrokPlanUsageDetails", () => {
 			true,
 		);
 		expect(lines).toContain("Unified billing pool");
+	});
+
+	it("renders product usage breakdown after on-demand", () => {
+		const u = parseGrokPlanUsage(
+			creditsPayload({
+				creditUsagePercent: 42,
+				productUsage: [
+					{ product: "PRODUCT_GROK_BUILD", usagePercent: 30 },
+					{ product: "PRODUCT_API", usagePercent: 12 },
+				],
+			}),
+			NOW,
+		);
+		const lines = renderGrokPlanUsageDetails(u, id);
+		const byProductIdx = lines.indexOf("By product");
+		expect(byProductIdx).toBeGreaterThan(0);
+		expect(lines[byProductIdx + 1]).toMatch(/Build\s+█+░*\s+30%/);
+		expect(lines[byProductIdx + 2]).toMatch(/API\s+█*░*\s+12%/);
 	});
 
 	it("shows a warning when no usable data is present", () => {

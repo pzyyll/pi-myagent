@@ -27,7 +27,7 @@ Grok W ███░░░░░ 42% ⟳ 4d 12h
 ```
 
 - `W` / `M` / `Credits` — included credit window from `creditUsagePercent` (or legacy `used`/`monthlyLimit`).
-- Detail view also shows prepaid balance, on-demand cap/used, period end, and subscription tier when present.
+- Detail view also shows prepaid balance, on-demand cap/used, period end, subscription tier, and `productUsage` breakdown (API / Build / Chat / Imagine / Voice) when present.
 
 Bar color: green below 70%, yellow 70–89%, red at 90%+.
 
