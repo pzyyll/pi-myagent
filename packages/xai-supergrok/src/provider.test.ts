@@ -1,18 +1,24 @@
 // ABOUTME: Tests SuperGrok provider seed models, catalog swap, and grok-build wire alignment.
 // ABOUTME: Covers Responses body strip, product headers, and oauth.modifyModels boundaries.
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Api, Model, OAuthCredentials } from "@earendil-works/pi-ai";
 import {
 	alignGrokBuildResponsesPayload,
 	applyGrokBuildProductHeaders,
 	catalogToModel,
 	catalogToProviderModelConfig,
+	credentialsWithoutModelsCatalog,
 	FALLBACK_CATALOG,
 	modifyXaiModelsForOAuth,
 	PROVIDER_ID,
 	SEED_MODELS,
 } from "./index";
 import type { CatalogModel } from "./catalog";
+import { saveModelsCatalogToCache } from "./models-cache";
+import { grokModelsCachePath } from "./paths";
 
 function seedAsRegistryModels(): Model<Api>[] {
 	// Mirrors applyProviderConfig: ProviderModelConfig → Model with provider/baseUrl/api filled in.
@@ -32,12 +38,11 @@ function seedAsRegistryModels(): Model<Api>[] {
 	}));
 }
 
-function oauthCreds(modelsCatalog?: CatalogModel[]): OAuthCredentials & { modelsCatalog?: CatalogModel[] } {
+function oauthCreds(): OAuthCredentials {
 	return {
 		refresh: "refresh-token",
 		access: "access-token",
 		expires: Date.now() + 3_600_000,
-		...(modelsCatalog ? { modelsCatalog } : {}),
 	};
 }
 
@@ -102,6 +107,27 @@ describe("SEED_MODELS (Pi registerProvider seed)", () => {
 		expect(grokBuild?.thinkingLevelMap).toBeUndefined();
 	});
 
+	it("maps composer-2.5 to always-on reasoning with fixed thinkingLevelMap", () => {
+		const model = catalogToModel({
+			id: "grok-composer-2.5-fast",
+			name: "Composer 2.5",
+			reasoning: true,
+			input: ["text", "image"],
+			cost: { input: 0.5, output: 2.5, cacheRead: 0.2, cacheWrite: 0 },
+			contextWindow: 200_000,
+			maxTokens: 128_000,
+		});
+		expect(model.reasoning).toBe(true);
+		expect(model.thinkingLevelMap).toEqual({
+			off: null,
+			minimal: null,
+			low: null,
+			medium: null,
+			high: "high",
+			xhigh: null,
+		});
+	});
+
 	it("mirrors FALLBACK_CATALOG ids (single source of truth)", () => {
 		expect(SEED_MODELS.map((m) => m.id)).toEqual(FALLBACK_CATALOG.map((m) => m.id));
 	});
@@ -126,6 +152,27 @@ describe("SEED_MODELS (Pi registerProvider seed)", () => {
 });
 
 describe("modifyXaiModelsForOAuth (credential catalog vs seed)", () => {
+	// Isolate from real ~/.pi/agent/grok_models_cache.json and ~/.grok/models_cache.json.
+	let prevGrokHome: string | undefined;
+	let prevAgentDir: string | undefined;
+	let tempHome: string;
+
+	beforeEach(() => {
+		prevGrokHome = process.env.GROK_HOME;
+		prevAgentDir = process.env.PI_CODING_AGENT_DIR;
+		tempHome = mkdtempSync(join(tmpdir(), "xai-supergrok-provider-"));
+		process.env.GROK_HOME = join(tempHome, "grok");
+		process.env.PI_CODING_AGENT_DIR = join(tempHome, "agent");
+	});
+
+	afterEach(() => {
+		if (prevGrokHome === undefined) delete process.env.GROK_HOME;
+		else process.env.GROK_HOME = prevGrokHome;
+		if (prevAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = prevAgentDir;
+		rmSync(tempHome, { recursive: true, force: true });
+	});
+
 	it("keeps FALLBACK / seed models when credentials have no remote catalog", () => {
 		const seed = seedAsRegistryModels();
 		const other: Model<Api> = {
@@ -151,7 +198,7 @@ describe("modifyXaiModelsForOAuth (credential catalog vs seed)", () => {
 		expect(ours.every((m) => m.baseUrl === "https://cli-chat-proxy.grok.com/v1")).toBe(true);
 	});
 
-	it("replaces seed with remote modelsCatalog when present on credentials", () => {
+	it("replaces seed with disk-cached ModelsCatalog (not credentials)", () => {
 		const seed = seedAsRegistryModels();
 		const remote: CatalogModel[] = [
 			{
@@ -174,27 +221,46 @@ describe("modifyXaiModelsForOAuth (credential catalog vs seed)", () => {
 			},
 		];
 
-		const result = modifyXaiModelsForOAuth(seed, oauthCreds(remote));
+		saveModelsCatalogToCache(remote, {
+			origin: "https://cli-chat-proxy.grok.com/v1/models",
+			authMethod: "session",
+			path: grokModelsCachePath(),
+		});
+
+		// Even if credentials carry a legacy modelsCatalog, disk cache wins and auth field is ignored.
+		const creds = {
+			...oauthCreds(),
+			modelsCatalog: [{ id: "should-not-appear" }],
+		} as OAuthCredentials;
+		const result = modifyXaiModelsForOAuth(seed, creds);
 		const ours = result.filter((m) => m.provider === PROVIDER_ID);
 
-		// Seed fully replaced — no leftover seed-only ids like grok-build unless remote listed it
 		expect(ours.map((m) => m.id)).toEqual(["remote-only", "grok-4.5"]);
 		expect(ours.map((m) => m.id)).not.toContain("grok-build");
+		expect(ours.map((m) => m.id)).not.toContain("should-not-appear");
 		expect(ours.find((m) => m.id === "grok-4.5")?.name).toBe("Grok 4.5 (entitled)");
 		expect(ours.find((m) => m.id === "grok-4.5")?.maxTokens).toBe(64_000);
 		expect(ours.find((m) => m.id === "remote-only")?.contextWindow).toBe(42_000);
 	});
 
-	it("ignores invalid modelsCatalog and falls back to FALLBACK_CATALOG", () => {
+	it("falls back to FALLBACK_CATALOG when disk cache is empty", () => {
 		const seed = seedAsRegistryModels();
-		const creds = oauthCreds();
-		// Corrupt catalog as auth.json might store garbage — sanitize drops it
-		(creds as { modelsCatalog: unknown }).modelsCatalog = [{ id: "not-a-full-entry" }];
-
-		const result = modifyXaiModelsForOAuth(seed, creds);
+		const result = modifyXaiModelsForOAuth(seed, oauthCreds());
 		expect(result.filter((m) => m.provider === PROVIDER_ID).map((m) => m.id)).toEqual(
 			FALLBACK_CATALOG.map((m) => m.id),
 		);
+	});
+
+	it("strips modelsCatalog from OAuth credentials for auth.json storage", () => {
+		const dirty = {
+			...oauthCreds(),
+			modelsCatalog: [{ id: "nope" }],
+			userId: "u1",
+		} as OAuthCredentials & { modelsCatalog?: unknown; userId?: string };
+		const clean = credentialsWithoutModelsCatalog(dirty);
+		expect(clean.access).toBe("access-token");
+		expect(clean.userId).toBe("u1");
+		expect(Object.prototype.hasOwnProperty.call(clean, "modelsCatalog")).toBe(false);
 	});
 });
 
@@ -225,6 +291,16 @@ describe("alignGrokBuildResponsesPayload (body wire)", () => {
 		const aligned = alignGrokBuildResponsesPayload({
 			model: "grok-build",
 		}) as { reasoning: { summary: string; effort?: string } };
+
+		expect(aligned.reasoning).toEqual({ summary: "concise" });
+		expect(aligned.reasoning.effort).toBeUndefined();
+	});
+
+	it("strips effort for always-on composer models (supportsReasoningEffort=false)", () => {
+		const aligned = alignGrokBuildResponsesPayload(
+			{ reasoning: { effort: "high", summary: "auto" } },
+			{ modelId: "grok-composer-2.5-fast" },
+		) as { reasoning: { effort?: string; summary: string } };
 
 		expect(aligned.reasoning).toEqual({ summary: "concise" });
 		expect(aligned.reasoning.effort).toBeUndefined();

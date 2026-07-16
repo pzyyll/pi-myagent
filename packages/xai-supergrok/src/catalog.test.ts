@@ -2,9 +2,11 @@
 // ABOUTME: Covers field aliases, hidden filtering, and JWT user id peeks.
 import { describe, expect, it } from "bun:test";
 import {
+	ALWAYS_ON_REASONING_THINKING_LEVEL_MAP,
 	buildThinkingLevelMap,
 	DEFAULT_CONTEXT_WINDOW,
 	FALLBACK_CATALOG,
+	isAlwaysOnReasoningModel,
 	LEGACY_REASONING_EFFORTS,
 	modelsListUrl,
 	parseReasoningEffortOptions,
@@ -78,6 +80,22 @@ describe("parseRemoteModelEntry", () => {
 			reasoningEfforts: ["high"],
 		});
 		expect(unsupported?.reasoningEfforts).toBeUndefined();
+	});
+
+	it("marks composer-2.5 as reasoning even when supportsReasoningEffort is false", () => {
+		expect(isAlwaysOnReasoningModel("grok-composer-2.5-fast")).toBe(true);
+
+		const model = parseRemoteModelEntry({
+			id: "grok-composer-2.5-fast",
+			name: "Composer 2.5",
+			supportsReasoningEffort: false,
+			reasoningEfforts: ["high", "xhigh"],
+			contextWindow: 200_000,
+		});
+		expect(model?.reasoning).toBe(true);
+		// Effort menu ignored when server says effort is not selectable.
+		expect(model?.reasoningEfforts).toBeUndefined();
+		expect(thinkingLevelMapForCatalog(model!)).toEqual(ALWAYS_ON_REASONING_THINKING_LEVEL_MAP);
 	});
 
 	it("accepts snake_case aliases and _meta fields", () => {
@@ -210,6 +228,20 @@ describe("reasoning effort parsing / thinkingLevelMap", () => {
 				maxTokens: 1,
 			}),
 		).toBeUndefined();
+	});
+
+	it("thinkingLevelMapForCatalog locks always-on composer models to a fixed map", () => {
+		expect(
+			thinkingLevelMapForCatalog({
+				id: "grok-composer-2.5-fast",
+				name: "Composer 2.5",
+				reasoning: true,
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 1,
+				maxTokens: 1,
+			}),
+		).toEqual(ALWAYS_ON_REASONING_THINKING_LEVEL_MAP);
 	});
 });
 

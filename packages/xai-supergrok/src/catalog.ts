@@ -1,5 +1,5 @@
 // ABOUTME: Fetches and parses the SuperGrok cli-chat-proxy /v1/models catalog.
-// ABOUTME: Mirrors grok-build session-auth model listing for OAuth credential storage.
+// ABOUTME: Mirrors grok-build session-auth model listing for disk-backed ModelsCatalog cache.
 
 import { resolveXaiModelCost } from "./pricing";
 
@@ -172,9 +172,36 @@ export function buildThinkingLevelMap(
 	};
 }
 
+/**
+ * Models that always emit reasoning content but reject selectable effort
+ * (`supportsReasoningEffort: false` in CCP). grok-build still sends
+ * `reasoning.summary = concise` and leaves `effort` unset for these.
+ */
+export function isAlwaysOnReasoningModel(id: string): boolean {
+	return /composer[-_]?2\.5/i.test(id);
+}
+
+/**
+ * Fixed Pi menu for always-on reasoning models: no off/minimal/low/medium/xhigh.
+ * Single `high` sentinel keeps getSupportedThinkingLevels non-empty (cycle UI);
+ * wire `effort` is stripped in alignGrokBuildResponsesPayload.
+ */
+export const ALWAYS_ON_REASONING_THINKING_LEVEL_MAP: ThinkingLevelMap = {
+	off: null,
+	minimal: null,
+	low: null,
+	medium: null,
+	high: "high",
+	xhigh: null,
+};
+
 /** thinkingLevelMap for a catalog entry; undefined when effort is unsupported. */
 export function thinkingLevelMapForCatalog(entry: CatalogModel): ThinkingLevelMap | undefined {
 	if (!entry.reasoning) return undefined;
+	// Always-on models (composer-2.5): reason by default, no effort picker.
+	if (isAlwaysOnReasoningModel(entry.id) && !entry.reasoningEfforts?.length) {
+		return ALWAYS_ON_REASONING_THINKING_LEVEL_MAP;
+	}
 	return buildThinkingLevelMap(entry.reasoningEfforts ?? LEGACY_REASONING_EFFORTS);
 }
 
@@ -221,16 +248,20 @@ export function parseRemoteModelEntry(value: unknown): CatalogModel | undefined 
 		(meta ? firstNumber(meta, "maxCompletionTokens", "max_completion_tokens") : undefined);
 	const maxTokens = maxCompletion ?? Math.min(contextWindow, 128_000);
 
-	const reasoning =
+	// CCP `supportsReasoningEffort` only means selectable effort — not "emits reasoning".
+	// e.g. grok-composer-2.5-fast always reasons but advertises supportsReasoningEffort=false.
+	const supportsEffort =
 		firstBool(value, "supportsReasoningEffort", "supports_reasoning_effort") ??
 		(meta ? firstBool(meta, "supportsReasoningEffort", "supports_reasoning_effort") : undefined) ??
 		false;
+	const reasoning = supportsEffort || isAlwaysOnReasoningModel(id);
 
 	const effortsRaw =
 		value.reasoningEfforts ??
 		value.reasoning_efforts ??
 		(meta ? (meta.reasoningEfforts ?? meta.reasoning_efforts) : undefined);
-	const reasoningEfforts = reasoning ? parseReasoningEffortOptions(effortsRaw) : undefined;
+	// Only parse effort menus when the server says effort is selectable.
+	const reasoningEfforts = supportsEffort ? parseReasoningEffortOptions(effortsRaw) : undefined;
 
 	return {
 		id,
@@ -272,7 +303,7 @@ export function isCatalogModel(value: unknown): value is CatalogModel {
 	);
 }
 
-/** Sanitize a modelsCatalog field loaded from auth.json. */
+/** Sanitize a CatalogModel[] array (tests / defensive parsing). */
 export function sanitizeModelsCatalog(value: unknown): CatalogModel[] | undefined {
 	if (!Array.isArray(value)) return undefined;
 	const models = value.filter(isCatalogModel).map((m) => {
@@ -300,14 +331,26 @@ export function modelsListUrl(baseUrl: string): string {
 	return `${baseUrl.replace(/\/+$/, "")}/models`;
 }
 
-/** GET /v1/models with grok-build session-auth headers. */
-export async function fetchModelsCatalog(
+export interface FetchModelsCatalogResult {
+	models: CatalogModel[];
+	/** Raw `data[]` entries for models_cache-style persistence. */
+	rawEntries: unknown[];
+	etag?: string;
+	origin: string;
+	/** True when server returned 304 Not Modified. */
+	notModified?: boolean;
+}
+
+/** GET /v1/models with grok-build session-auth headers (etag-aware). */
+export async function fetchModelsCatalogDetailed(
 	baseUrl: string,
 	headers: SessionAuthHeaders,
 	signal?: AbortSignal,
-): Promise<CatalogModel[]> {
+	opts?: { etag?: string },
+): Promise<FetchModelsCatalogResult> {
+	const origin = modelsListUrl(baseUrl);
 	const userId = headers.userId ?? peekJwtUserId(headers.accessToken);
-	const response = await globalThis.fetch(modelsListUrl(baseUrl), {
+	const response = await globalThis.fetch(origin, {
 		method: "GET",
 		headers: {
 			Accept: "application/json",
@@ -317,9 +360,16 @@ export async function fetchModelsCatalog(
 			"x-grok-client-identifier": headers.clientIdentifier,
 			"x-grok-client-mode": headers.clientModeValue,
 			...(userId ? { "x-userid": userId } : {}),
+			...(opts?.etag ? { "If-None-Match": opts.etag } : {}),
 		},
 		signal,
 	});
+
+	const etag = response.headers.get("etag") ?? undefined;
+
+	if (response.status === 304) {
+		return { models: [], rawEntries: [], etag: etag ?? opts?.etag, origin, notModified: true };
+	}
 
 	if (!response.ok) {
 		const detail = await response.text().catch(() => "");
@@ -327,5 +377,17 @@ export async function fetchModelsCatalog(
 	}
 
 	const payload: unknown = await response.json();
-	return parseRemoteModels(payload);
+	const models = parseRemoteModels(payload);
+	const rawEntries = isRecord(payload) && Array.isArray(payload.data) ? (payload.data as unknown[]) : [];
+	return { models, rawEntries, etag, origin };
+}
+
+/** GET /v1/models with grok-build session-auth headers. */
+export async function fetchModelsCatalog(
+	baseUrl: string,
+	headers: SessionAuthHeaders,
+	signal?: AbortSignal,
+): Promise<CatalogModel[]> {
+	const result = await fetchModelsCatalogDetailed(baseUrl, headers, signal);
+	return result.models;
 }
