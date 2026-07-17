@@ -35,6 +35,8 @@ Before the final answer:
 
 ## Coding
 
+Avoid magic numbers — name every non-trivial literal with a descriptive constant.
+
 Prefer current, non-deprecated API and library versions. If a signature, config option, or migration path may be outdated, verify against live docs before relying on it. Do not pick deprecated or not-recommended versions unless I explicitly ask; if the project already uses one, keep the change scoped and surface the risk. When a version chosen in a plan, spec, or code conflicts with docs you retrieve later, surface the mismatch and ask which to follow instead of silently picking.
 
 # Evidence And Clarification
