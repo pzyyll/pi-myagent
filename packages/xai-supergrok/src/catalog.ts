@@ -71,10 +71,10 @@ export { ZERO_COST, resolveXaiModelCost } from "./pricing";
 export interface SessionAuthHeaders {
 	accessToken: string;
 	clientVersion: string;
-	clientIdentifier: string;
 	tokenAuthValue: string;
 	clientModeValue: string;
 	userId?: string;
+	email?: string;
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -357,9 +357,9 @@ export async function fetchModelsCatalogDetailed(
 			Authorization: `Bearer ${headers.accessToken}`,
 			"X-XAI-Token-Auth": headers.tokenAuthValue,
 			"x-grok-client-version": headers.clientVersion,
-			"x-grok-client-identifier": headers.clientIdentifier,
 			"x-grok-client-mode": headers.clientModeValue,
 			...(userId ? { "x-userid": userId } : {}),
+			...(headers.email ? { "x-email": headers.email } : {}),
 			...(opts?.etag ? { "If-None-Match": opts.etag } : {}),
 		},
 		signal,
@@ -390,4 +390,39 @@ export async function fetchModelsCatalog(
 ): Promise<CatalogModel[]> {
 	const result = await fetchModelsCatalogDetailed(baseUrl, headers, signal);
 	return result.models;
+}
+
+/** GET /v1/models with standard Bearer token auth (api.x.ai path). */
+export async function fetchApiModelsCatalog(
+	baseUrl: string,
+	apiKey: string,
+	signal?: AbortSignal,
+	opts?: { etag?: string },
+): Promise<FetchModelsCatalogResult> {
+	const origin = modelsListUrl(baseUrl);
+	const response = await globalThis.fetch(origin, {
+		method: "GET",
+		headers: {
+			Accept: "application/json",
+			Authorization: `Bearer ${apiKey}`,
+			...(opts?.etag ? { "If-None-Match": opts.etag } : {}),
+		},
+		signal,
+	});
+
+	const etag = response.headers.get("etag") ?? undefined;
+
+	if (response.status === 304) {
+		return { models: [], rawEntries: [], etag: etag ?? opts?.etag, origin, notModified: true };
+	}
+
+	if (!response.ok) {
+		const detail = await response.text().catch(() => "");
+		throw new Error(`xAI API models request failed (${response.status})${detail ? `: ${detail}` : ""}`);
+	}
+
+	const payload: unknown = await response.json();
+	const models = parseRemoteModels(payload);
+	const rawEntries = isRecord(payload) && Array.isArray(payload.data) ? (payload.data as unknown[]) : [];
+	return { models, rawEntries, etag, origin };
 }

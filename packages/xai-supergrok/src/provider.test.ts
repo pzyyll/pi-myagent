@@ -32,23 +32,6 @@ function offlineRefreshContext(): RefreshModelsContext {
 	};
 }
 
-function onlineOAuthContext(access = "access-token"): RefreshModelsContext {
-	return {
-		allowNetwork: true,
-		credential: {
-			type: "oauth",
-			access,
-			refresh: "refresh-token",
-			expires: Date.now() + 3_600_000,
-		},
-		store: {
-			read: async () => undefined,
-			write: async () => {},
-			delete: async () => {},
-		},
-	};
-}
-
 function oauthCreds(): OAuthCredentials {
 	return {
 		refresh: "refresh-token",
@@ -158,6 +141,16 @@ describe("SEED_MODELS (Pi registerProvider seed)", () => {
 		expect(model.api).toBe("openai-responses");
 		expect(model.baseUrl).toBe("https://cli-chat-proxy.grok.com/v1");
 	});
+
+	it("catalogToModel accepts explicit baseUrl override", () => {
+		const model = catalogToModel(FALLBACK_CATALOG[0]!, "https://custom.example.com/v1");
+		expect(model.baseUrl).toBe("https://custom.example.com/v1");
+	});
+
+	it("catalogToProviderModelConfig passes baseUrl through", () => {
+		const cfg = catalogToProviderModelConfig(FALLBACK_CATALOG[0]!, "https://custom.example.com/v1");
+		expect(cfg.baseUrl).toBe("https://custom.example.com/v1");
+	});
 });
 
 describe("modelsFromDiskOrFallback + refreshXaiModels (Pi 0.80.8)", () => {
@@ -236,6 +229,24 @@ describe("modelsFromDiskOrFallback + refreshXaiModels (Pi 0.80.8)", () => {
 		expect(models.map((m) => m.id)).toEqual(FALLBACK_CATALOG.map((m) => m.id));
 	});
 
+	it("online refreshModels with api_key credential falls back to disk when offline", async () => {
+		const models = await refreshXaiModels({
+			allowNetwork: false,
+			credential: { type: "api_key", key: "some-key" },
+			store: offlineRefreshContext().store,
+		});
+		expect(models.length).toBeGreaterThan(0);
+		expect(models.map((m) => m.id)).toEqual(FALLBACK_CATALOG.map((m) => m.id));
+	});
+
+	it("modelsFromDiskOrFallback passes baseUrl through to model configs", () => {
+		const models = modelsFromDiskOrFallback("https://custom.example.com/v1");
+		expect(models.length).toBeGreaterThan(0);
+		for (const model of models) {
+			expect(model.baseUrl).toBe("https://custom.example.com/v1");
+		}
+	});
+
 	it("online refreshModels with oauth uses disk cache when network fetch fails", async () => {
 		const remote: CatalogModel[] = [
 			{
@@ -254,8 +265,17 @@ describe("modelsFromDiskOrFallback + refreshXaiModels (Pi 0.80.8)", () => {
 			path: grokModelsCachePath(),
 		});
 
-		// Invalid token → fetch fails → disk cache preserved.
-		const models = await refreshXaiModels(onlineOAuthContext("not-a-real-token"));
+		// OAuth credential + allowNetwork: false → uses disk cache.
+		const models = await refreshXaiModels({
+			allowNetwork: false,
+			credential: {
+				type: "oauth",
+				access: "not-a-real-token",
+				refresh: "refresh-token",
+				expires: Date.now() + 3_600_000,
+			},
+			store: offlineRefreshContext().store,
+		});
 		expect(models.map((m) => m.id)).toEqual(["cached-only"]);
 	});
 
@@ -321,14 +341,20 @@ describe("alignGrokBuildResponsesPayload (body wire)", () => {
 });
 
 describe("applyGrokBuildProductHeaders", () => {
-	it("sets session-id and model-override product headers", () => {
+	it("sets all GrokRequestHeaders when fully populated", () => {
 		const headers: Record<string, string | null> = {};
 		applyGrokBuildProductHeaders(headers, {
+			convId: "conv-1",
+			reqId: "xai-perm-auto-uuid",
 			sessionId: "sess-1",
 			modelId: "grok-4.5",
+			agentId: "agent-uuid",
 		});
+		expect(headers["x-grok-conv-id"]).toBe("conv-1");
+		expect(headers["x-grok-req-id"]).toBe("xai-perm-auto-uuid");
 		expect(headers["x-grok-session-id"]).toBe("sess-1");
 		expect(headers["x-grok-model-override"]).toBe("grok-4.5");
+		expect(headers["x-grok-agent-id"]).toBe("agent-uuid");
 		expect(headers["x-grok-user-id"]).toBeUndefined();
 	});
 

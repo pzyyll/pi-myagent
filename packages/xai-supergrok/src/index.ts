@@ -4,10 +4,20 @@ import { execFileSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { URLSearchParams } from "node:url";
 import type { Api, Model, OAuthCredentials, OAuthLoginCallbacks, RefreshModelsContext } from "@earendil-works/pi-ai";
-import { type ExtensionAPI, type ProviderModelConfig, readStoredCredential } from "@earendil-works/pi-coding-agent";
+import {
+	type ExtensionAPI,
+	type ProviderModelConfig,
+	getAgentDir,
+	readStoredCredential,
+} from "@earendil-works/pi-coding-agent";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
+import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 import {
 	type CatalogModel,
 	FALLBACK_CATALOG,
+	fetchApiModelsCatalog,
 	fetchModelsCatalogDetailed,
 	isAlwaysOnReasoningModel,
 	isRecord,
@@ -23,7 +33,7 @@ import {
 	type SuperGrokCredentials,
 } from "./grok-auth";
 import { loadModelsCatalogFromCache, saveModelsCatalogToCache } from "./models-cache";
-import { grokHome, OIDC_CLIENT_ID, OIDC_ISSUER } from "./paths";
+import { grokAgentIdPath, grokHome, OIDC_CLIENT_ID, OIDC_ISSUER, piGrokAgentIdPath } from "./paths";
 
 const CLIENT_ID = OIDC_CLIENT_ID;
 // Resolve the installed grok CLI version so the proxy attributes requests to a
@@ -52,14 +62,16 @@ function resolveGrokVersion(): string {
 const CLIENT_VERSION = resolveGrokVersion();
 // pi renders the device code + URL in its TUI, matching grok-build's `Ui` surface.
 const CLIENT_SURFACE = "ui";
+// Match grok-build sampler DEFAULT_CLIENT_IDENTIFIER / AGENT_PRODUCT.
+const CLIENT_IDENTIFIER = "grok-shell";
 // Match grok-build's client identifier so the proxy attributes traffic to the
 // Grok CLI product (not a generic API client) for subscription gating.
-const CLIENT_IDENTIFIER = "grok-shell";
 const OAUTH_REFERRER = "grok-build";
 // Subscription OAuth path only (matches grok-build session routing).
 // Built-in Pi provider `xai` + XAI_API_KEY remains the public API-key path.
 const PROVIDER_ID = "xai-supergrok";
 const CLI_CHAT_PROXY_BASE_URL = "https://cli-chat-proxy.grok.com/v1";
+const API_BASE_URL = "https://api.x.ai/v1";
 const MODELS_ORIGIN = modelsListUrl(CLI_CHAT_PROXY_BASE_URL);
 // Proxy-only headers injected when baseUrl is cli-chat-proxy.
 const TOKEN_AUTH_HEADER = "X-XAI-Token-Auth";
@@ -68,6 +80,7 @@ const AUTHENTICATE_RESPONSE_HEADER = "x-authenticateresponse";
 const AUTHENTICATE_RESPONSE_VALUE = "authenticate-response";
 const CLIENT_MODE_HEADER = "x-grok-client-mode";
 const CLIENT_MODE_VALUE = "interactive";
+const CLIENT_IDENTIFIER_HEADER = "x-grok-client-identifier";
 const TOKEN_URL = "https://auth.x.ai/oauth2/token";
 const DEVICE_AUTHORIZATION_URL = "https://auth.x.ai/oauth2/device/code";
 const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
@@ -79,6 +92,82 @@ const DEVICE_CODE_MIN_INTERVAL_MS = 1_000;
 const DEVICE_CODE_SLOW_DOWN_INCREMENT_MS = 5_000;
 const DEVICE_CODE_DEFAULT_EXPIRES_MS = 5 * 60 * 1000;
 const OAUTH_POLLING_SAFETY_MARGIN_MS = 3_000;
+
+/** Map process.platform → grok-build PlatformInfo.os. */
+function platformOs(): string {
+	switch (process.platform) {
+		case "darwin":
+			return "macos";
+		case "win32":
+			return "windows";
+		default:
+			return process.platform;
+	}
+}
+
+/** Map process.arch → grok-build PlatformInfo.arch. */
+function platformArch(): string {
+	switch (process.arch) {
+		case "arm64":
+			return "aarch64";
+		case "x64":
+			return "x86_64";
+		default:
+			return process.arch;
+	}
+}
+
+/** User-Agent matching grok-build sampler: `grok-shell/<ver> (os; arch)`. */
+function buildUserAgent(version: string = CLIENT_VERSION): string {
+	return `${CLIENT_IDENTIFIER}/${version} (${platformOs()}; ${platformArch()})`;
+}
+
+function readAgentIdFile(path: string): string | undefined {
+	try {
+		const cached = readFileSync(path, "utf8").trim();
+		return cached.length > 0 ? cached : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Stable agent id for x-grok-agent-id.
+ * Order: ~/.grok/agent_id (read-only) → ~/.pi/agent/grok_agent_id → create Pi-owned file.
+ * Never writes into ~/.grok so local grok-build is not affected.
+ */
+function resolveAgentId(): string {
+	const fromGrok = readAgentIdFile(grokAgentIdPath());
+	if (fromGrok) return fromGrok;
+
+	const piPath = piGrokAgentIdPath();
+	const fromPi = readAgentIdFile(piPath);
+	if (fromPi) return fromPi;
+
+	// Prefer a hostname-derived deterministic id on Linux (like grok-build),
+	// otherwise random UUID. Deterministic shape uses SHA-1 UUID v5-ish hex.
+	const host = hostname();
+	const id =
+		host && host.length > 0
+			? createHash("sha1")
+					.update(`agent_id:${host}`)
+					.digest("hex")
+					.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12}).*$/, "$1-$2-$3-$4-$5")
+			: crypto.randomUUID();
+	try {
+		mkdirSync(dirname(piPath), { recursive: true });
+		const tmp = `${piPath}.tmp.${process.pid}.${Date.now()}`;
+		writeFileSync(tmp, `${id}\n`, { encoding: "utf8", mode: 0o600 });
+		renameSync(tmp, piPath);
+	} catch {
+		// Best-effort cache write.
+	}
+	return id;
+}
+
+// Process-lifetime agent id (disk-backed when possible).
+const AGENT_ID = resolveAgentId();
+const USER_AGENT = buildUserAgent();
 // Align with grok-build Responses path (session OAuth → cli-chat-proxy):
 // - system role only (no developer)
 // - no OpenAI session_id header (sticky routing via x-grok-session-id)
@@ -217,8 +306,9 @@ export function getModelsCatalog(): CatalogModel[] | undefined {
  */
 async function refreshModelsCache(credentials: OAuthCredentials, signal?: AbortSignal): Promise<SuperGrokCredentials> {
 	const clean = credentialsWithoutModelsCatalog(credentials);
+	const origin = modelsListUrl(CLI_CHAT_PROXY_BASE_URL);
 	const previousCache = loadModelsCatalogFromCache({
-		expectedOrigin: MODELS_ORIGIN,
+		expectedOrigin: origin,
 	});
 
 	try {
@@ -227,17 +317,16 @@ async function refreshModelsCache(credentials: OAuthCredentials, signal?: AbortS
 			{
 				accessToken: clean.access,
 				clientVersion: CLIENT_VERSION,
-				clientIdentifier: CLIENT_IDENTIFIER,
 				tokenAuthValue: TOKEN_AUTH_VALUE,
 				clientModeValue: CLIENT_MODE_VALUE,
 				userId: clean.userId,
+				email: clean.email,
 			},
 			signal,
 			{ etag: previousCache?.etag },
 		);
 
 		if (result.notModified && previousCache?.models.length) {
-			// Renew TTL by rewriting with current models + etag.
 			saveModelsCatalogToCache(previousCache.models, {
 				origin: result.origin,
 				grokVersion: CLIENT_VERSION,
@@ -263,9 +352,8 @@ async function refreshModelsCache(credentials: OAuthCredentials, signal?: AbortS
 		if (previousCache?.models.length) {
 			return clean;
 		}
-		// Empty remote list with no prior cache — keep the bake-in fallback so /model works.
 		saveModelsCatalogToCache(FALLBACK_CATALOG, {
-			origin: MODELS_ORIGIN,
+			origin,
 			grokVersion: CLIENT_VERSION,
 			authMethod: "session",
 			baseUrl: CLI_CHAT_PROXY_BASE_URL,
@@ -276,12 +364,55 @@ async function refreshModelsCache(credentials: OAuthCredentials, signal?: AbortS
 			return clean;
 		}
 		saveModelsCatalogToCache(FALLBACK_CATALOG, {
-			origin: MODELS_ORIGIN,
+			origin,
 			grokVersion: CLIENT_VERSION,
 			authMethod: "session",
 			baseUrl: CLI_CHAT_PROXY_BASE_URL,
 		});
 		return clean;
+	}
+}
+
+/** Fetch remote catalog from api.x.ai with Bearer token and persist to disk cache. */
+async function refreshModelsFromApi(apiKey: string, baseUrl: string, signal?: AbortSignal): Promise<void> {
+	const origin = modelsListUrl(baseUrl);
+	const previousCache = loadModelsCatalogFromCache({
+		expectedOrigin: origin,
+	});
+
+	try {
+		const result = await fetchApiModelsCatalog(baseUrl, apiKey, signal, {
+			etag: previousCache?.etag,
+		});
+
+		if (result.notModified && previousCache?.models.length) {
+			saveModelsCatalogToCache(previousCache.models, {
+				origin: result.origin,
+				authMethod: "api_key",
+				etag: result.etag ?? previousCache.etag,
+				baseUrl,
+			});
+			return;
+		}
+
+		if (result.models.length > 0) {
+			saveModelsCatalogToCache(result.models, {
+				origin: result.origin,
+				authMethod: "api_key",
+				etag: result.etag,
+				rawEntries: result.rawEntries,
+				baseUrl,
+			});
+			return;
+		}
+
+		if (previousCache?.models.length) {
+			return;
+		}
+		// Empty remote list with no prior cache — don't persist; caller falls back.
+	} catch {
+		// Fetch failed — don't persist FALLBACK so custom endpoints aren't
+		// overwritten with api.x.ai origin on every refresh.
 	}
 }
 
@@ -471,27 +602,39 @@ export function alignGrokBuildResponsesPayload(payload: unknown, opts?: { modelI
 	return next;
 }
 
-/** Product headers grok-build attaches on every sampling request. */
+/** Product headers grok-build attaches on every sampling request (GrokRequestHeaders). */
 export function applyGrokBuildProductHeaders(
 	headers: Record<string, string | null>,
-	opts: { sessionId?: string; modelId?: string; accessToken?: string },
+	opts: {
+		convId?: string;
+		reqId?: string;
+		sessionId?: string;
+		modelId?: string;
+		agentId?: string;
+		accessToken?: string;
+	},
 ): void {
-	if (opts.sessionId) {
-		headers[SESSION_ID_HEADER] = opts.sessionId;
-	}
-	if (opts.modelId) {
-		headers[MODEL_OVERRIDE_HEADER] = opts.modelId;
-	}
+	if (opts.convId) headers["x-grok-conv-id"] = opts.convId;
+	if (opts.reqId) headers["x-grok-req-id"] = opts.reqId;
+	if (opts.sessionId) headers[SESSION_ID_HEADER] = opts.sessionId;
+	if (opts.modelId) headers[MODEL_OVERRIDE_HEADER] = opts.modelId;
+	if (opts.agentId) headers["x-grok-agent-id"] = opts.agentId;
 	if (opts.accessToken) {
 		const userId = peekJwtUserId(opts.accessToken);
 		if (userId) headers[USER_ID_HEADER] = userId;
 	}
 }
 
+/** True for cli-chat-proxy production host, or loopback (local mock servers). */
 function isCliChatProxyUrl(url: string | undefined): boolean {
 	if (!url) return false;
 	try {
-		return new URL(url).host === "cli-chat-proxy.grok.com";
+		const parsed = new URL(url);
+		const host = parsed.hostname;
+		if (host === "cli-chat-proxy.grok.com") return true;
+		// Match grok-build: loopback is always accepted for local mock servers.
+		if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
+		return false;
 	} catch {
 		return url.includes("cli-chat-proxy.grok.com");
 	}
@@ -516,17 +659,17 @@ function catalogModelFields(entry: CatalogModel) {
 }
 
 /** ProviderModelConfig seed / refreshModels entry from a CatalogModel. */
-export function catalogToProviderModelConfig(entry: CatalogModel): ProviderModelConfig {
-	return catalogModelFields(entry);
+export function catalogToProviderModelConfig(entry: CatalogModel, baseUrl?: string): ProviderModelConfig {
+	return { ...catalogModelFields(entry), baseUrl };
 }
 
 /** Full Model for tests and callers that need provider/baseUrl/api filled in. */
-export function catalogToModel(entry: CatalogModel): Model<Api> {
+export function catalogToModel(entry: CatalogModel, baseUrl = CLI_CHAT_PROXY_BASE_URL): Model<Api> {
 	return {
 		...catalogModelFields(entry),
 		api: "openai-responses",
 		provider: PROVIDER_ID,
-		baseUrl: CLI_CHAT_PROXY_BASE_URL,
+		baseUrl,
 	};
 }
 
@@ -534,35 +677,70 @@ export function catalogToModel(entry: CatalogModel): Model<Api> {
  * Non-empty seed from FALLBACK_CATALOG.
  * Cold-start list before Pi runs refreshModels; disk/remote catalog replaces it.
  */
-export const SEED_MODELS: ProviderModelConfig[] = FALLBACK_CATALOG.map(catalogToProviderModelConfig);
+export const SEED_MODELS: ProviderModelConfig[] = FALLBACK_CATALOG.map((e) => catalogToProviderModelConfig(e));
 
 /** Disk cache or FALLBACK_CATALOG as ProviderModelConfig[] for this provider only. */
-export function modelsFromDiskOrFallback(): ProviderModelConfig[] {
+export function modelsFromDiskOrFallback(baseUrl?: string): ProviderModelConfig[] {
 	const catalog = getModelsCatalog() ?? FALLBACK_CATALOG;
-	return catalog.map(catalogToProviderModelConfig);
+	return catalog.map((e) => catalogToProviderModelConfig(e, baseUrl));
+}
+
+/** Read the configured baseUrl for this provider from ~/.pi/agent/models.json, if any. */
+function readConfiguredBaseUrl(): string | undefined {
+	try {
+		const raw = readFileSync(join(getAgentDir(), "models.json"), "utf8");
+		const parsed = JSON.parse(raw) as { providers?: Record<string, { baseUrl?: string }> };
+		const baseUrl = parsed.providers?.[PROVIDER_ID]?.baseUrl;
+		if (baseUrl && baseUrl.length > 0) return baseUrl;
+	} catch {
+		// models.json missing or unreadable — use defaults.
+	}
+	return undefined;
 }
 
 /**
  * Pi 0.80.8+ dynamic catalog discovery.
- * Offline / no OAuth: disk cache or FALLBACK_CATALOG.
- * Online + OAuth: fetch cli-chat-proxy /v1/models into ~/.pi/agent/grok_models_cache.json.
+ * - OAuth credential → fetch cli-chat-proxy /v1/models (session auth).
+ * - API key credential → fetch api.x.ai /v1/models (Bearer auth).
+ * - No credential or fetch failure → disk cache or FALLBACK_CATALOG.
+ * - Custom base URL (non-api.x.ai, non-cli-chat-proxy) → FALLBACK_CATALOG.
  */
 export async function refreshXaiModels(context: RefreshModelsContext): Promise<ProviderModelConfig[]> {
-	if (!context.allowNetwork) {
-		return modelsFromDiskOrFallback();
-	}
-
 	const credential = context.credential;
-	if (!credential || credential.type !== "oauth" || !credential.access) {
-		return modelsFromDiskOrFallback();
+	const isOAuth = credential?.type === "oauth" && typeof credential.access === "string" && credential.access.length > 0;
+	const isApiKey = credential?.type === "api_key" && typeof credential.key === "string" && credential.key.length > 0;
+	// Honor models.json baseUrl override; API key mode also checks $XAI_API_KEY via ambient auth.
+	const configuredBaseUrl = readConfiguredBaseUrl();
+
+	if (isOAuth) {
+		// OAuth session tokens only work with cli-chat-proxy — never use a custom baseUrl.
+		const baseUrl = CLI_CHAT_PROXY_BASE_URL;
+		if (context.allowNetwork) {
+			try {
+				await refreshModelsCache(credentialsWithoutModelsCatalog(credential), context.signal);
+			} catch {
+				// Keep disk cache / fallback.
+			}
+		}
+		return modelsFromDiskOrFallback(baseUrl);
 	}
 
-	try {
-		await refreshModelsCache(credentialsWithoutModelsCatalog(credential), context.signal);
-	} catch {
-		// Keep disk cache / fallback.
+	if (isApiKey) {
+		const baseUrl = configuredBaseUrl ?? API_BASE_URL;
+		if (context.allowNetwork && baseUrl === API_BASE_URL) {
+			// Official api.x.ai: always attempt remote catalog (first start has no cache).
+			try {
+				await refreshModelsFromApi(credential.key!, API_BASE_URL, context.signal);
+			} catch {
+				// Network issue — disk cache / fallback handles it.
+			}
+		}
+		// Custom baseUrl: skip remote fetch, use cache or FALLBACK.
+		return modelsFromDiskOrFallback(baseUrl);
 	}
-	return modelsFromDiskOrFallback();
+
+	// No usable credential — serve disk cache or FALLBACK.
+	return modelsFromDiskOrFallback(configuredBaseUrl);
 }
 
 /** Sync read of stored OAuth access token for product headers (no AuthStorage API). */
@@ -579,9 +757,10 @@ export { PROVIDER_ID, FALLBACK_CATALOG, OIDC_ISSUER, OIDC_CLIENT_ID };
 export default function (pi: ExtensionAPI) {
 	pi.registerProvider(PROVIDER_ID, {
 		name: "xAI SuperGrok",
-		// Subscription OAuth only — separate from built-in `xai` (api.x.ai + optional Pi OAuth).
+		// Default base URL for OAuth (session) path; API key models get api.x.ai via refreshModels.
 		baseUrl: CLI_CHAT_PROXY_BASE_URL,
 		api: "openai-responses",
+		// Let models.json override the API key; env var $XAI_API_KEY is the ambient fallback.
 		// Seed for cold start; refreshModels replaces with disk/remote entitlements.
 		models: SEED_MODELS,
 		refreshModels: refreshXaiModels,
@@ -603,16 +782,23 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("before_provider_headers", (event, ctx) => {
 		if (ctx.model?.provider !== PROVIDER_ID) return;
+
+		// Always sent (matches grok-build sampler Client::new + GrokRequestHeaders).
+		event.headers["user-agent"] = USER_AGENT;
 		event.headers["x-grok-client-version"] = CLIENT_VERSION;
-		event.headers["x-grok-client-identifier"] = CLIENT_IDENTIFIER;
+		// sampler always injects this, even when SamplerConfig.client_identifier is None.
+		event.headers[CLIENT_IDENTIFIER_HEADER] = CLIENT_IDENTIFIER;
 
 		applyGrokBuildProductHeaders(event.headers, {
+			convId: ctx.sessionManager.getSessionId(),
+			reqId: `xai-perm-auto-${crypto.randomUUID()}`,
 			sessionId: ctx.sessionManager.getSessionId(),
 			modelId: ctx.model.id,
+			agentId: AGENT_ID,
 			accessToken: storedAccessToken(),
 		});
 
-		// cli-chat-proxy requires these product/auth attribution headers.
+		// Proxy-specific headers only when routing to cli-chat-proxy / loopback.
 		if (isCliChatProxyUrl(ctx.model.baseUrl)) {
 			event.headers[TOKEN_AUTH_HEADER] = TOKEN_AUTH_VALUE;
 			event.headers[AUTHENTICATE_RESPONSE_HEADER] = AUTHENTICATE_RESPONSE_VALUE;
