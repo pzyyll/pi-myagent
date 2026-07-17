@@ -15,14 +15,11 @@
 		"format:check": "prettier --check .",
 		"check": "bun run typecheck && bun run lint && bun run format:check"
 	},
-	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": "*"
-	},
 	"devDependencies": {
-		"@earendil-works/pi-agent-core": "0.80.9",
-		"@earendil-works/pi-ai": "0.80.9",
-		"@earendil-works/pi-coding-agent": "0.80.9",
-		"@earendil-works/pi-tui": "0.80.9",
+		"@earendil-works/pi-agent-core": "0.80.10",
+		"@earendil-works/pi-ai": "0.80.10",
+		"@earendil-works/pi-coding-agent": "0.80.10",
+		"@earendil-works/pi-tui": "0.80.10",
 		"@eslint/js": "^10.0.1",
 		"eslint": "^10.7.0",
 		"eslint-config-prettier": "^10.1.8",
