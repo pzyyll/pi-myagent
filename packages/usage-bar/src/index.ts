@@ -139,7 +139,9 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	const sync = (ctx: ExtensionContext, model: Model<any> | undefined) => {
-		const channel = findChannelForModel(model);
+		// Subscription usage endpoints need OAuth session tokens. API-key mode for the
+		// same provider (e.g. xai-supergrok BYOK) will 401 against billing APIs — skip.
+		const channel = model && ctx.modelRegistry.isUsingOAuth(model) ? findChannelForModel(model) : undefined;
 		if (model && channel) {
 			generation++;
 			abort?.abort();
@@ -204,8 +206,8 @@ export default function (pi: ExtensionAPI) {
 			if (!channel) return;
 
 			const model = resolveModelForChannel(channel, ctx.modelRegistry.getAvailable(), ctx.model);
-			if (!model) {
-				ctx.ui.notify(`usage-bar: no credentials available for ${channel.brand}`, "info");
+			if (!model || !ctx.modelRegistry.isUsingOAuth(model)) {
+				ctx.ui.notify(`usage-bar: no OAuth subscription credentials for ${channel.brand}`, "info");
 				return;
 			}
 

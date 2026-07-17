@@ -33,7 +33,8 @@ Bar color: green below 70%, yellow 70–89%, red at 90%+.
 
 ## Behavior
 
-- Active footer channel follows the current model provider (`openai-codex` or `xai-supergrok`).
+- Active footer channel follows the current model provider (`openai-codex` or `xai-supergrok`) **only when that provider is authenticated via OAuth** (subscription session).
+- API-key / BYOK mode for the same provider does not poll: subscription usage endpoints reject API keys with HTTP 401.
 - Fetches on session start and model selection, then polls every 2 minutes.
 - Resolves credentials through Pi's model registry (`getApiKeyAndHeaders`), so Pi handles OAuth refresh for both Codex and SuperGrok.
 - Grok requests inject cli-chat-proxy product headers (`X-XAI-Token-Auth: xai-grok-cli`, client version/identifier/mode, optional `x-userid` from JWT).
