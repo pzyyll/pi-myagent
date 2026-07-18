@@ -8,9 +8,7 @@ export interface ResolvedAuth {
 	readonly headers: Record<string, string>;
 }
 
-export type ChannelFetchResult =
-	| { ok: true; view: ChannelUsageView }
-	| { ok: false; error: string; aborted?: boolean };
+export type ChannelFetchResult = { ok: true; view: ChannelUsageView } | { ok: false; error: string; aborted?: boolean };
 
 export interface ChannelUsageView {
 	readonly channelId: string;

@@ -1,12 +1,7 @@
 // ABOUTME: Codex usage channel — ChatGPT wham/usage endpoint and plan parsing.
 // ABOUTME: Resolves chatgpt-account-id from JWT claims when the registry omits it.
 import { retryNetworkRequest } from "../retry";
-import {
-	parseCodexPlanUsage,
-	renderCodexPlanUsageDetails,
-	renderCodexUsage,
-	type CodexPlanUsage,
-} from "../usage";
+import { parseCodexPlanUsage, renderCodexPlanUsageDetails, renderCodexUsage, type CodexPlanUsage } from "../usage";
 import type { ChannelFetchArgs, ChannelFetchResult, ChannelUsageView, UsageChannel } from "./types";
 
 const PROVIDER_ID = "openai-codex";
@@ -37,22 +32,19 @@ export const codexChannel: UsageChannel = {
 		}
 
 		try {
-			const result = await retryNetworkRequest(
-				async () => {
-					const controller = nestedAbort(args.signal, FETCH_TIMEOUT_MS);
-					try {
-						const response = await (args.fetchImpl ?? fetch)(ENDPOINT, {
-							headers,
-							signal: controller.signal,
-						});
-						const json: unknown = response.ok ? await response.json() : undefined;
-						return { response, json };
-					} finally {
-						controller.dispose();
-					}
-				},
-				args.shouldContinue,
-			);
+			const result = await retryNetworkRequest(async () => {
+				const controller = nestedAbort(args.signal, FETCH_TIMEOUT_MS);
+				try {
+					const response = await (args.fetchImpl ?? fetch)(ENDPOINT, {
+						headers,
+						signal: controller.signal,
+					});
+					const json: unknown = response.ok ? await response.json() : undefined;
+					return { response, json };
+				} finally {
+					controller.dispose();
+				}
+			}, args.shouldContinue);
 			if (!args.shouldContinue()) return { ok: false, error: "usage-bar: cancelled", aborted: true };
 			if (!result.response.ok) {
 				return { ok: false, error: `usage-bar: HTTP ${result.response.status}` };

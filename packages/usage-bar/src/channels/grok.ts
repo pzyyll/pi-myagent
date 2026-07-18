@@ -1,11 +1,6 @@
 // ABOUTME: SuperGrok OAuth usage channel via cli-chat-proxy billing credits API.
 // ABOUTME: Injects grok-build product headers; does not depend on xai-supergrok at runtime.
-import {
-	parseGrokPlanUsage,
-	renderGrokPlanUsageDetails,
-	renderGrokUsage,
-	type GrokPlanUsage,
-} from "../grok-usage";
+import { parseGrokPlanUsage, renderGrokPlanUsageDetails, renderGrokUsage, type GrokPlanUsage } from "../grok-usage";
 import { retryNetworkRequest } from "../retry";
 import type { ChannelFetchArgs, ChannelFetchResult, ChannelUsageView, UsageChannel } from "./types";
 
@@ -49,22 +44,19 @@ export const grokChannel: UsageChannel = {
 		}
 
 		try {
-			const result = await retryNetworkRequest(
-				async () => {
-					const controller = nestedAbort(args.signal, FETCH_TIMEOUT_MS);
-					try {
-						const response = await (args.fetchImpl ?? fetch)(BILLING_URL, {
-							headers,
-							signal: controller.signal,
-						});
-						const json: unknown = response.ok ? await response.json() : undefined;
-						return { response, json };
-					} finally {
-						controller.dispose();
-					}
-				},
-				args.shouldContinue,
-			);
+			const result = await retryNetworkRequest(async () => {
+				const controller = nestedAbort(args.signal, FETCH_TIMEOUT_MS);
+				try {
+					const response = await (args.fetchImpl ?? fetch)(BILLING_URL, {
+						headers,
+						signal: controller.signal,
+					});
+					const json: unknown = response.ok ? await response.json() : undefined;
+					return { response, json };
+				} finally {
+					controller.dispose();
+				}
+			}, args.shouldContinue);
 			if (!args.shouldContinue()) return { ok: false, error: "usage-bar: cancelled", aborted: true };
 			if (!result.response.ok) {
 				return { ok: false, error: `usage-bar: HTTP ${result.response.status}` };

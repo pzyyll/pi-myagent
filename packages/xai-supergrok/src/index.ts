@@ -72,7 +72,14 @@ const OAUTH_REFERRER = "grok-build";
 const PROVIDER_ID = "xai-supergrok";
 const CLI_CHAT_PROXY_BASE_URL = "https://cli-chat-proxy.grok.com/v1";
 const API_BASE_URL = "https://api.x.ai/v1";
-const MODELS_ORIGIN = modelsListUrl(CLI_CHAT_PROXY_BASE_URL);
+// Set GROK_OAUTH_USE_API_URL=1 to temporarily route OAuth session traffic to
+// api.x.ai instead of cli-chat-proxy ("0"/"false"/unset keep the proxy).
+const ENV_OAUTH_USE_API_URL = "GROK_OAUTH_USE_API_URL";
+
+function oauthBaseUrl(): string {
+	const flag = process.env[ENV_OAUTH_USE_API_URL];
+	return flag && flag !== "0" && flag !== "false" ? API_BASE_URL : CLI_CHAT_PROXY_BASE_URL;
+}
 // Proxy-only headers injected when baseUrl is cli-chat-proxy.
 const TOKEN_AUTH_HEADER = "X-XAI-Token-Auth";
 const TOKEN_AUTH_VALUE = "xai-grok-cli";
@@ -295,7 +302,7 @@ export function credentialsWithoutModelsCatalog(credentials: OAuthCredentials): 
  */
 export function getModelsCatalog(): CatalogModel[] | undefined {
 	const cached = loadModelsCatalogFromCache({
-		expectedOrigin: MODELS_ORIGIN,
+		expectedOrigin: modelsListUrl(oauthBaseUrl()),
 	});
 	return cached?.models.length ? cached.models : undefined;
 }
@@ -306,14 +313,15 @@ export function getModelsCatalog(): CatalogModel[] | undefined {
  */
 async function refreshModelsCache(credentials: OAuthCredentials, signal?: AbortSignal): Promise<SuperGrokCredentials> {
 	const clean = credentialsWithoutModelsCatalog(credentials);
-	const origin = modelsListUrl(CLI_CHAT_PROXY_BASE_URL);
+	const baseUrl = oauthBaseUrl();
+	const origin = modelsListUrl(baseUrl);
 	const previousCache = loadModelsCatalogFromCache({
 		expectedOrigin: origin,
 	});
 
 	try {
 		const result = await fetchModelsCatalogDetailed(
-			CLI_CHAT_PROXY_BASE_URL,
+			baseUrl,
 			{
 				accessToken: clean.access,
 				clientVersion: CLIENT_VERSION,
@@ -332,7 +340,7 @@ async function refreshModelsCache(credentials: OAuthCredentials, signal?: AbortS
 				grokVersion: CLIENT_VERSION,
 				authMethod: "session",
 				etag: result.etag ?? previousCache.etag,
-				baseUrl: CLI_CHAT_PROXY_BASE_URL,
+				baseUrl,
 			});
 			return clean;
 		}
@@ -344,7 +352,7 @@ async function refreshModelsCache(credentials: OAuthCredentials, signal?: AbortS
 				authMethod: "session",
 				etag: result.etag,
 				rawEntries: result.rawEntries,
-				baseUrl: CLI_CHAT_PROXY_BASE_URL,
+				baseUrl,
 			});
 			return clean;
 		}
@@ -356,7 +364,7 @@ async function refreshModelsCache(credentials: OAuthCredentials, signal?: AbortS
 			origin,
 			grokVersion: CLIENT_VERSION,
 			authMethod: "session",
-			baseUrl: CLI_CHAT_PROXY_BASE_URL,
+			baseUrl,
 		});
 		return clean;
 	} catch {
@@ -367,7 +375,7 @@ async function refreshModelsCache(credentials: OAuthCredentials, signal?: AbortS
 			origin,
 			grokVersion: CLIENT_VERSION,
 			authMethod: "session",
-			baseUrl: CLI_CHAT_PROXY_BASE_URL,
+			baseUrl,
 		});
 		return clean;
 	}
@@ -473,7 +481,7 @@ async function loginWithDeviceCode(callbacks: OAuthLoginCallbacks): Promise<OAut
 	const device = await requestDeviceCode(callbacks.signal);
 	callbacks.onDeviceCode({
 		userCode: device.user_code,
-		verificationUri: device.verification_uri,
+		verificationUri: device.verification_uri_complete ?? device.verification_uri,
 		intervalSeconds: positiveSecondsToMs(device.interval, DEVICE_CODE_DEFAULT_INTERVAL_MS) / 1000,
 		expiresInSeconds: positiveSecondsToMs(device.expires_in, DEVICE_CODE_DEFAULT_EXPIRES_MS) / 1000,
 	});
@@ -664,7 +672,7 @@ export function catalogToProviderModelConfig(entry: CatalogModel, baseUrl?: stri
 }
 
 /** Full Model for tests and callers that need provider/baseUrl/api filled in. */
-export function catalogToModel(entry: CatalogModel, baseUrl = CLI_CHAT_PROXY_BASE_URL): Model<Api> {
+export function catalogToModel(entry: CatalogModel, baseUrl = oauthBaseUrl()): Model<Api> {
 	return {
 		...catalogModelFields(entry),
 		api: "openai-responses",
@@ -714,7 +722,8 @@ export async function refreshXaiModels(context: RefreshModelsContext): Promise<P
 
 	if (isOAuth) {
 		// OAuth session tokens only work with cli-chat-proxy — never use a custom baseUrl.
-		const baseUrl = CLI_CHAT_PROXY_BASE_URL;
+		// GROK_OAUTH_USE_API_URL temporarily reroutes to api.x.ai instead.
+		const baseUrl = oauthBaseUrl();
 		if (context.allowNetwork) {
 			try {
 				await refreshModelsCache(credentialsWithoutModelsCatalog(credential), context.signal);
@@ -758,7 +767,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerProvider(PROVIDER_ID, {
 		name: "xAI SuperGrok",
 		// Default base URL for OAuth (session) path; API key models get api.x.ai via refreshModels.
-		baseUrl: CLI_CHAT_PROXY_BASE_URL,
+		baseUrl: oauthBaseUrl(),
 		api: "openai-responses",
 		// Let models.json override the API key; env var $XAI_API_KEY is the ambient fallback.
 		// Seed for cold start; refreshModels replaces with disk/remote entitlements.
