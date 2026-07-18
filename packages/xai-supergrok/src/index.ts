@@ -194,6 +194,7 @@ interface XaiTokenResponse {
 	expires_in?: number;
 	token_type?: string;
 	scope?: string;
+	id_token?: string;
 }
 
 interface DeviceCodeResponse {
@@ -280,6 +281,7 @@ function toLoginCredentials(tokens: XaiTokenResponse): SuperGrokCredentials {
 			accessToken: tokens.access_token,
 			refreshToken: tokens.refresh_token,
 			expiresInSeconds: typeof tokens.expires_in === "number" ? tokens.expires_in : undefined,
+			idToken: tokens.id_token,
 		},
 		{ kind: "login" },
 	);
@@ -567,6 +569,7 @@ async function refreshXaiToken(credentials: OAuthCredentials): Promise<OAuthCred
 			accessToken: tokens.access_token,
 			refreshToken: tokens.refresh_token ?? refreshToken,
 			expiresInSeconds: typeof tokens.expires_in === "number" ? tokens.expires_in : undefined,
+			idToken: tokens.id_token,
 		},
 		{ kind: "refresh", previousCredentials: current },
 	);

@@ -36,6 +36,8 @@ export interface GrokAuthEntry {
 	expires_at?: string | null;
 	oidc_issuer?: string | null;
 	oidc_client_id?: string | null;
+	user_blocked_reason?: string | null;
+	team_blocked_reasons?: string[];
 	[key: string]: unknown;
 }
 
@@ -45,9 +47,12 @@ export type GrokAuthStore = Record<string, GrokAuthEntry>;
 export type SuperGrokCredentials = OAuthCredentials & {
 	userId?: string;
 	email?: string;
+	firstName?: string;
+	lastName?: string;
 	principalType?: string;
 	principalId?: string;
 	teamId?: string;
+	codingDataRetentionOptOut?: boolean;
 	oidcIssuer?: string;
 	oidcClientId?: string;
 	/** ISO create_time carried from an optional Grok import. */
@@ -137,9 +142,14 @@ export function grokAuthToCredentials(entry: GrokAuthEntry): SuperGrokCredential
 		expires,
 		...(userId ? { userId } : {}),
 		...(entry.email ? { email: entry.email } : {}),
+		...(entry.first_name ? { firstName: entry.first_name } : {}),
+		...(entry.last_name ? { lastName: entry.last_name } : {}),
 		...(entry.principal_type ? { principalType: entry.principal_type } : {}),
 		...(entry.principal_id ? { principalId: entry.principal_id } : {}),
 		...(entry.team_id ? { teamId: entry.team_id } : {}),
+		...(typeof entry.coding_data_retention_opt_out === "boolean"
+			? { codingDataRetentionOptOut: entry.coding_data_retention_opt_out }
+			: {}),
 		...(entry.oidc_issuer ? { oidcIssuer: entry.oidc_issuer } : {}),
 		...(entry.oidc_client_id ? { oidcClientId: entry.oidc_client_id } : {}),
 		...(entry.create_time ? { createTime: entry.create_time } : {}),
@@ -185,22 +195,43 @@ export function buildGrokAuthEntry(input: {
 	expiresInSeconds?: number;
 	issuer?: string;
 	clientId?: string;
+	idToken?: string;
 	previous?: GrokAuthEntry;
 	now?: Date;
 }): GrokAuthEntry {
 	const now = input.now ?? new Date();
-	const claims = decodeJwtPayload(input.accessToken) ?? {};
+	// Principal claims live in the access_token (xAI-specific, peeked unverified).
+	const accessClaims = decodeJwtPayload(input.accessToken) ?? {};
+	// User identity (sub) and email live in the id_token, NOT the access_token.
+	const idClaims = input.idToken ? (decodeJwtPayload(input.idToken) ?? {}) : {};
 	const prev = input.previous;
 
-	const principalType = firstString(claims, "principal_type", "principalType") ?? prev?.principal_type ?? undefined;
-	const principalId = firstString(claims, "principal_id", "principalId") ?? prev?.principal_id ?? undefined;
-	const teamId = firstString(claims, "team_id", "teamId") ?? prev?.team_id ?? undefined;
-	const userId =
-		(principalType === "Team" && principalId ? principalId : undefined) ??
-		firstString(claims, "sub", "user_id", "userId") ??
-		prev?.user_id ??
-		"";
-	const email = firstString(claims, "email") ?? prev?.email ?? undefined;
+	const principalType =
+		firstString(accessClaims, "principal_type", "principalType") ?? prev?.principal_type ?? undefined;
+	const principalId = firstString(accessClaims, "principal_id", "principalId") ?? prev?.principal_id ?? undefined;
+	const tokenTeamId = firstString(accessClaims, "team_id", "teamId") ?? undefined;
+	const idSub = firstString(idClaims, "sub", "user_id", "userId");
+	const idEmail = firstString(idClaims, "email");
+
+	// Team/Org principal override: token represents the team/org, not the user.
+	// Matches grok-build build_auth: user_id = principal_id, email = None.
+	let userId: string;
+	let email: string | undefined;
+	let teamId: string | undefined;
+	let organizationId: string | undefined;
+	if (principalType === "Team" && principalId) {
+		userId = principalId;
+		email = undefined;
+		teamId = principalId;
+	} else if (principalType === "Organization" && principalId) {
+		userId = principalId;
+		email = undefined;
+		organizationId = principalId;
+	} else {
+		userId = idSub ?? prev?.user_id ?? "";
+		email = idEmail ?? prev?.email ?? undefined;
+		teamId = tokenTeamId ?? prev?.team_id ?? undefined;
+	}
 
 	const expiresAt =
 		input.expiresInSeconds && input.expiresInSeconds > 0
@@ -221,10 +252,12 @@ export function buildGrokAuthEntry(input: {
 		team_id: teamId ?? null,
 		team_name: prev?.team_name ?? null,
 		team_role: prev?.team_role ?? null,
-		organization_id: prev?.organization_id ?? null,
+		organization_id: organizationId ?? prev?.organization_id ?? null,
 		organization_name: prev?.organization_name ?? null,
 		organization_role: prev?.organization_role ?? null,
 		coding_data_retention_opt_out: prev?.coding_data_retention_opt_out ?? false,
+		user_blocked_reason: prev?.user_blocked_reason ?? null,
+		team_blocked_reasons: prev?.team_blocked_reasons ?? [],
 		refresh_token: input.refreshToken,
 		expires_at: expiresAt ?? null,
 		oidc_issuer: input.issuer ?? prev?.oidc_issuer ?? OIDC_ISSUER,
@@ -241,6 +274,7 @@ export function credentialsFromTokens(
 		accessToken: string;
 		refreshToken: string;
 		expiresInSeconds?: number;
+		idToken?: string;
 	},
 	opts?: {
 		previousCredentials?: SuperGrokCredentials;
@@ -257,9 +291,12 @@ export function credentialsFromTokens(
 					refresh_token: opts.previousCredentials.refresh,
 					user_id: opts.previousCredentials.userId,
 					email: opts.previousCredentials.email,
+					first_name: opts.previousCredentials.firstName,
+					last_name: opts.previousCredentials.lastName,
 					principal_type: opts.previousCredentials.principalType,
 					principal_id: opts.previousCredentials.principalId,
 					team_id: opts.previousCredentials.teamId,
+					coding_data_retention_opt_out: opts.previousCredentials.codingDataRetentionOptOut,
 					oidc_issuer: opts.previousCredentials.oidcIssuer ?? OIDC_ISSUER,
 					oidc_client_id: opts.previousCredentials.oidcClientId ?? OIDC_CLIENT_ID,
 					create_time: opts.previousCredentials.createTime,
@@ -270,6 +307,7 @@ export function credentialsFromTokens(
 		accessToken: tokens.accessToken,
 		refreshToken: tokens.refreshToken,
 		expiresInSeconds: tokens.expiresInSeconds,
+		idToken: tokens.idToken,
 		issuer: previous?.oidc_issuer ?? OIDC_ISSUER,
 		clientId: previous?.oidc_client_id ?? OIDC_CLIENT_ID,
 		previous: kind === "refresh" ? previous : undefined,

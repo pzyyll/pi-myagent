@@ -20,6 +20,13 @@ function tempAuthPath(): { dir: string; path: string } {
 	return { dir, path: join(dir, "auth.json") };
 }
 
+/** Build an unsigned JWT with the given payload claims (header.payload.). */
+function fakeJwt(payload: Record<string, unknown>): string {
+	const header = Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url");
+	const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+	return `${header}.${body}.`;
+}
+
 const dirs: string[] = [];
 
 afterEach(() => {
@@ -44,6 +51,9 @@ describe("grok auth.json bridge", () => {
 					create_time: new Date().toISOString(),
 					user_id: "user-1",
 					email: "u@example.com",
+					first_name: "Eric",
+					last_name: "Roberts",
+					coding_data_retention_opt_out: true,
 					principal_type: "User",
 					principal_id: "user-1",
 					refresh_token: "refresh-from-grok",
@@ -59,6 +69,9 @@ describe("grok auth.json bridge", () => {
 		expect(creds?.refresh).toBe("refresh-from-grok");
 		expect(creds?.userId).toBe("user-1");
 		expect(creds?.email).toBe("u@example.com");
+		expect(creds?.firstName).toBe("Eric");
+		expect(creds?.lastName).toBe("Roberts");
+		expect(creds?.codingDataRetentionOptOut).toBe(true);
 		// expires is hard expiry minus early invalidation
 		expect(creds?.expires).toBeLessThanOrEqual(Date.parse(expiresAt) - EARLY_INVALIDATION_MS + 5);
 		expect(creds?.expires).toBeGreaterThan(Date.now());
@@ -89,6 +102,49 @@ describe("grok auth.json bridge", () => {
 		expect(creds.expires).toBeGreaterThan(Date.now());
 		expect(creds.oidcIssuer).toBe("https://auth.x.ai");
 		expect(creds.oidcClientId).toBe("b1a00492-073a-47ea-816f-4c329264a828");
+	});
+
+	it("extracts email and user_id from id_token, not access_token", () => {
+		const accessToken = fakeJwt({ principal_type: "User", principal_id: "user-1" });
+		const idToken = fakeJwt({ sub: "user-1", email: "from-id@example.com" });
+		const creds = credentialsFromTokens(
+			{ accessToken, refreshToken: "rt", expiresInSeconds: 3600, idToken },
+			{ kind: "login" },
+		);
+		expect(creds.email).toBe("from-id@example.com");
+		expect(creds.userId).toBe("user-1");
+	});
+
+	it("team principal overrides user_id to principal_id and clears email", () => {
+		const accessToken = fakeJwt({ principal_type: "Team", principal_id: "team-abc" });
+		const idToken = fakeJwt({ sub: "user-1", email: "user@example.com" });
+		const creds = credentialsFromTokens(
+			{ accessToken, refreshToken: "rt", expiresInSeconds: 3600, idToken },
+			{ kind: "login" },
+		);
+		expect(creds.userId).toBe("team-abc");
+		expect(creds.email).toBeUndefined();
+		expect(creds.teamId).toBe("team-abc");
+	});
+
+	it("falls back to previous email when id_token is absent on refresh", () => {
+		const accessToken = fakeJwt({ principal_type: "User", principal_id: "user-1" });
+		const previous = {
+			access: "old-access",
+			refresh: "old-refresh",
+			expires: Date.now() + 1000,
+			userId: "user-1",
+			email: "prev@example.com",
+			principalType: "User",
+			principalId: "user-1",
+			oauthClientId: "b1a00492-073a-47ea-816f-4c329264a828",
+		};
+		const creds = credentialsFromTokens(
+			{ accessToken, refreshToken: "rotated", expiresInSeconds: 3600 },
+			{ kind: "refresh", previousCredentials: previous },
+		);
+		expect(creds.email).toBe("prev@example.com");
+		expect(creds.userId).toBe("user-1");
 	});
 
 	it("credentialsFromTokens refresh preserves createTime and profile fields", () => {
