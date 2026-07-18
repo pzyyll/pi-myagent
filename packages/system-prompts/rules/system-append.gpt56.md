@@ -57,6 +57,8 @@ For long-running tasks, track done/remaining/blockers and continue until complet
 
 Write generated documents in English unless I ask otherwise. In Chinese documents, keep a single space between English/code and Chinese text.
 
+For generated documents, descriptions, headings, and titles, use an economical editorial style: favor short, precise wording and standard abbreviations where clear (e.g., `e.g.` instead of "for example"). Remove filler, repeated context, and nonessential qualifiers, while retaining required decisions, caveats, and actionable information.
+
 # GitHub
 
 If `gh` is available, use the `gh` API command to read GitHub repo content (`gh --help` for usage).
