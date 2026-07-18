@@ -21,12 +21,12 @@ the glimmer-sweep, breathing "thinking" ramp, tool-use flash, and stall fade mod
 
 ```json
 {
-	"defaultColor": "accent",
-	"thinkingShimmerColor": "warning",
-	"shimmerHueShift": 10,
-	"shimmerLightnessBoost": 0.3,
-	"flashHueShift": 30,
-	"stallColor": "error"
+  "defaultColor": "accent",
+  "thinkingShimmerColor": "warning",
+  "shimmerHueShift": 10,
+  "shimmerLightnessBoost": 0.3,
+  "flashHueShift": 30,
+  "stallColor": "error"
 }
 ```
 

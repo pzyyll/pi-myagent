@@ -17,38 +17,38 @@ export const GROK_AGENT_ID_FILE = "agent_id";
 export const PI_GROK_AGENT_ID_FILE = "grok_agent_id";
 
 export function grokHome(): string {
-	return process.env.GROK_HOME || join(homedir(), ".grok");
+  return process.env.GROK_HOME || join(homedir(), ".grok");
 }
 
 /** `~/.grok/agent_id` — read-only warm-start from Grok Build (never written by Pi). */
 export function grokAgentIdPath(): string {
-	return join(grokHome(), GROK_AGENT_ID_FILE);
+  return join(grokHome(), GROK_AGENT_ID_FILE);
 }
 
 /** Pi agent config dir (e.g. ~/.pi/agent), honors PI_CODING_AGENT_DIR. */
 export function piAgentDir(): string {
-	return getAgentDir();
+  return getAgentDir();
 }
 
 /** `~/.pi/agent/grok_agent_id` — Pi-owned persistent agent id for x-grok-agent-id. */
 export function piGrokAgentIdPath(): string {
-	return join(piAgentDir(), PI_GROK_AGENT_ID_FILE);
+  return join(piAgentDir(), PI_GROK_AGENT_ID_FILE);
 }
 
 export function grokAuthPath(): string {
-	return join(grokHome(), GROK_AUTH_FILE);
+  return join(grokHome(), GROK_AUTH_FILE);
 }
 
 /** `~/.pi/agent/grok_models_cache.json` — Pi-owned ModelsCatalog cache. */
 export function grokModelsCachePath(): string {
-	return join(piAgentDir(), GROK_MODELS_CACHE_FILE);
+  return join(piAgentDir(), GROK_MODELS_CACHE_FILE);
 }
 
 export function grokBuildModelsCachePath(): string {
-	return join(grokHome(), GROK_BUILD_MODELS_CACHE_FILE);
+  return join(grokHome(), GROK_BUILD_MODELS_CACHE_FILE);
 }
 
 /** auth.json scope key: `{issuer}::{client_id}` (grok-build GrokComConfig::auth_scope). */
 export function authScopeKey(issuer: string = OIDC_ISSUER, clientId: string = OIDC_CLIENT_ID): string {
-	return `${issuer.replace(/\/+$/, "")}::${clientId}`;
+  return `${issuer.replace(/\/+$/, "")}::${clientId}`;
 }

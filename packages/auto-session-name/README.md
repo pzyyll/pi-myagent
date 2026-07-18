@@ -28,12 +28,12 @@ Optional `~/.pi/agent/@myagent/auto-session-name/config.json`:
 
 ```json
 {
-	"enabled": true,
-	"maxLength": 40,
-	"style": "concise",
-	"prompt": "...",
-	"model": "openai/gpt-5.4-mini",
-	"fallbackModels": ["openai/gpt-4.1-mini", "anthropic/claude-haiku-4-5"]
+  "enabled": true,
+  "maxLength": 40,
+  "style": "concise",
+  "prompt": "...",
+  "model": "openai/gpt-5.4-mini",
+  "fallbackModels": ["openai/gpt-4.1-mini", "anthropic/claude-haiku-4-5"]
 }
 ```
 

@@ -1,22 +1,22 @@
 {
-	"name": "@myagent/responsive-footer",
-	"version": "0.1.0",
-	"private": true,
-	"description": "Wraps Pi's footer status segments across multiple lines so they stay visible on narrow terminals.",
-	"keywords": [
-		"pi-package",
-		"pi-extension"
-	],
-	"files": [
-		"src",
-		"README.md"
-	],
-	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": "*"
-	},
-	"pi": {
-		"extensions": [
-			"./src/index.ts"
-		]
-	}
+  "name": "@myagent/responsive-footer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Wraps Pi's footer status segments across multiple lines so they stay visible on narrow terminals.",
+  "keywords": [
+    "pi-package",
+    "pi-extension"
+  ],
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
 }

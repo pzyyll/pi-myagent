@@ -1,26 +1,26 @@
 {
-	"name": "@myagent/usage-bar",
-	"version": "0.1.0",
-	"private": true,
-	"description": "Footer usage bar and /usages details for Codex and SuperGrok subscription channels.",
-	"keywords": [
-		"pi-package",
-		"pi-extension"
-	],
-	"files": [
-		"src",
-		"README.md"
-	],
-	"scripts": {
-		"test": "bun test"
-	},
-	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": "*",
-		"@earendil-works/pi-ai": "*"
-	},
-	"pi": {
-		"extensions": [
-			"./src/index.ts"
-		]
-	}
+  "name": "@myagent/usage-bar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Footer usage bar and /usages details for Codex and SuperGrok subscription channels.",
+  "keywords": [
+    "pi-package",
+    "pi-extension"
+  ],
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "bun test"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
 }

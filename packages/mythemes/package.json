@@ -1,26 +1,26 @@
 {
-	"name": "@myagent/ansi-themes",
-	"version": "0.1.0",
-	"private": true,
-	"description": "Dark and light Pi themes that follow the terminal's ANSI palette.",
-	"keywords": [
-		"pi-package",
-		"pi-theme"
-	],
-	"files": [
-		"src",
-		"themes",
-		"README.md"
-	],
-	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": "*"
-	},
-	"pi": {
-		"themes": [
-			"./themes"
-		],
-		"extensions": [
-			"./src/index.ts"
-		]
-	}
+  "name": "@myagent/ansi-themes",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Dark and light Pi themes that follow the terminal's ANSI palette.",
+  "keywords": [
+    "pi-package",
+    "pi-theme"
+  ],
+  "files": [
+    "src",
+    "themes",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "themes": [
+      "./themes"
+    ],
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
 }
