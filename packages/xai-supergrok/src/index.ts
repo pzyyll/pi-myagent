@@ -59,7 +59,13 @@ function resolveGrokVersion(): string {
   return GROK_VERSION_FALLBACK;
 }
 
-const CLIENT_VERSION = resolveGrokVersion();
+// Lazy: avoid execFileSync / disk I/O during extension module import.
+let clientVersion: string | undefined;
+function getClientVersion(): string {
+  clientVersion ??= resolveGrokVersion();
+  return clientVersion;
+}
+
 // pi renders the device code + URL in its TUI, matching grok-build's `Ui` surface.
 const CLIENT_SURFACE = "ui";
 // Match grok-build sampler DEFAULT_CLIENT_IDENTIFIER / AGENT_PRODUCT.
@@ -125,7 +131,7 @@ function platformArch(): string {
 }
 
 /** User-Agent matching grok-build sampler: `grok-shell/<ver> (os; arch)`. */
-function buildUserAgent(version: string = CLIENT_VERSION): string {
+function buildUserAgent(version: string = getClientVersion()): string {
   return `${CLIENT_IDENTIFIER}/${version} (${platformOs()}; ${platformArch()})`;
 }
 
@@ -172,9 +178,18 @@ function resolveAgentId(): string {
   return id;
 }
 
-// Process-lifetime agent id (disk-backed when possible).
-const AGENT_ID = resolveAgentId();
-const USER_AGENT = buildUserAgent();
+let agentId: string | undefined;
+function getAgentId(): string {
+  agentId ??= resolveAgentId();
+  return agentId;
+}
+
+let userAgent: string | undefined;
+function getUserAgent(): string {
+  userAgent ??= buildUserAgent();
+  return userAgent;
+}
+
 // Align with grok-build Responses path (session OAuth → cli-chat-proxy):
 // - system role only (no developer)
 // - no OpenAI session_id header (sticky routing via x-grok-session-id)
@@ -215,7 +230,7 @@ function authHeaders() {
   return {
     "Content-Type": "application/x-www-form-urlencoded",
     Accept: "application/json",
-    "x-grok-client-version": CLIENT_VERSION,
+    "x-grok-client-version": getClientVersion(),
     "x-grok-client-surface": CLIENT_SURFACE,
   };
 }
@@ -326,7 +341,7 @@ async function refreshModelsCache(credentials: OAuthCredentials, signal?: AbortS
       baseUrl,
       {
         accessToken: clean.access,
-        clientVersion: CLIENT_VERSION,
+        clientVersion: getClientVersion(),
         tokenAuthValue: TOKEN_AUTH_VALUE,
         clientModeValue: CLIENT_MODE_VALUE,
         userId: clean.userId,
@@ -339,7 +354,7 @@ async function refreshModelsCache(credentials: OAuthCredentials, signal?: AbortS
     if (result.notModified && previousCache?.models.length) {
       saveModelsCatalogToCache(previousCache.models, {
         origin: result.origin,
-        grokVersion: CLIENT_VERSION,
+        grokVersion: getClientVersion(),
         authMethod: "session",
         etag: result.etag ?? previousCache.etag,
         baseUrl,
@@ -350,7 +365,7 @@ async function refreshModelsCache(credentials: OAuthCredentials, signal?: AbortS
     if (result.models.length > 0) {
       saveModelsCatalogToCache(result.models, {
         origin: result.origin,
-        grokVersion: CLIENT_VERSION,
+        grokVersion: getClientVersion(),
         authMethod: "session",
         etag: result.etag,
         rawEntries: result.rawEntries,
@@ -364,7 +379,7 @@ async function refreshModelsCache(credentials: OAuthCredentials, signal?: AbortS
     }
     saveModelsCatalogToCache(FALLBACK_CATALOG, {
       origin,
-      grokVersion: CLIENT_VERSION,
+      grokVersion: getClientVersion(),
       authMethod: "session",
       baseUrl,
     });
@@ -375,7 +390,7 @@ async function refreshModelsCache(credentials: OAuthCredentials, signal?: AbortS
     }
     saveModelsCatalogToCache(FALLBACK_CATALOG, {
       origin,
-      grokVersion: CLIENT_VERSION,
+      grokVersion: getClientVersion(),
       authMethod: "session",
       baseUrl,
     });
@@ -796,8 +811,8 @@ export default function (pi: ExtensionAPI) {
     if (ctx.model?.provider !== PROVIDER_ID) return;
 
     // Always sent (matches grok-build sampler Client::new + GrokRequestHeaders).
-    event.headers["user-agent"] = USER_AGENT;
-    event.headers["x-grok-client-version"] = CLIENT_VERSION;
+    event.headers["user-agent"] = getUserAgent();
+    event.headers["x-grok-client-version"] = getClientVersion();
     // sampler always injects this, even when SamplerConfig.client_identifier is None.
     event.headers[CLIENT_IDENTIFIER_HEADER] = CLIENT_IDENTIFIER;
 
@@ -806,7 +821,7 @@ export default function (pi: ExtensionAPI) {
       reqId: `xai-perm-auto-${crypto.randomUUID()}`,
       sessionId: ctx.sessionManager.getSessionId(),
       modelId: ctx.model.id,
-      agentId: AGENT_ID,
+      agentId: getAgentId(),
       accessToken: storedAccessToken(),
     });
 
