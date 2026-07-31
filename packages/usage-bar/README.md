@@ -19,6 +19,7 @@ Codex 5h ███░░░░░ 38% ⟳ 2h  W ██████░░ 75% ⟳
 
 - `5h` — five-hour rolling window (`primary_window`).
 - `W` — weekly rolling window (`secondary_window`).
+- When any window reaches `100%` and finite credits remain, the footer prepends the balance, e.g. `Codex $40.14(1,003.48) W ...`.
 
 ### Grok (SuperGrok OAuth)
 

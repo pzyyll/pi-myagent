@@ -73,7 +73,7 @@ function toView(usage: CodexPlanUsage): ChannelUsageView {
     windows: usage.windows,
     usable: usage.usable,
     renderDetails: (fg) => renderCodexPlanUsageDetails(usage, fg),
-    renderStatus: (fg) => renderCodexUsage({ windows: usage.windows, usable: usage.windows.length > 0 }, fg),
+    renderStatus: (fg) => renderCodexUsage(usage, fg),
   };
 }
 

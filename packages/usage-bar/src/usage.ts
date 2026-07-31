@@ -10,7 +10,6 @@ import {
   isPlainObject,
   percentThemeColor,
   pickObject,
-  renderBrandUsage,
   renderWindow,
   type ThemeColorName,
   type ThemeFg,
@@ -22,6 +21,7 @@ export type CodexUsageWindow = UsageWindow;
 
 export interface CodexUsage {
   readonly windows: readonly CodexUsageWindow[];
+  readonly credits: CodexCredits | undefined;
   readonly usable: boolean;
 }
 
@@ -60,6 +60,7 @@ export interface CodexPlanUsage {
 const FIVE_HOURS_SECONDS = 5 * 60 * 60; // 18000
 const SEVEN_DAYS_SECONDS = 7 * 24 * 60 * 60; // 604800
 const DURATION_TOLERANCE_SECONDS = 60;
+const FULL_USAGE_PERCENT = 100;
 const CREDITS_PER_DOLLAR = 25;
 const USD_DECIMAL_PLACES = 2;
 const SECONDS_PER_DAY = 86_400;
@@ -68,7 +69,7 @@ const SECONDS_PER_MINUTE = 60;
 
 export function parseCodexUsage(raw: unknown, now: number): CodexUsage {
   const plan = parseCodexPlanUsage(raw, now);
-  return { windows: plan.windows, usable: plan.windows.length > 0 };
+  return { windows: plan.windows, credits: plan.credits, usable: plan.windows.length > 0 };
 }
 
 export function parseCodexPlanUsage(raw: unknown, now: number): CodexPlanUsage {
@@ -110,7 +111,12 @@ export function parseCodexPlanUsage(raw: unknown, now: number): CodexPlanUsage {
 }
 
 export function renderCodexUsage(usage: CodexUsage, fg: ThemeFg): string {
-  return renderBrandUsage("Codex", usage.windows, fg, BAR_WIDTH);
+  const parts = usage.windows.map((window) => renderWindow(window, fg, BAR_WIDTH)).filter((part) => part.length > 0);
+  if (parts.length === 0) return "";
+
+  const creditText = renderStatusCredits(usage, fg);
+  const brand = `${fg("accent", "Codex")}${creditText ? ` ${creditText}` : ""}`;
+  return `${brand} ${parts.join("  ")}`;
 }
 
 export function renderCodexPlanUsageDetails(usage: CodexPlanUsage, fg: ThemeFg): string[] {
@@ -295,6 +301,19 @@ function parseResetsIn(obj: Record<string, unknown>, now: number): string | unde
   }
   if (deadlineMs === undefined || !Number.isFinite(deadlineMs)) return undefined;
   return formatRemaining(deadlineMs - now);
+}
+
+function renderStatusCredits(usage: CodexUsage, fg: ThemeFg): string | undefined {
+  const credits = usage.credits;
+  if (!credits || credits.unlimited || !credits.hasCredits || credits.balance === undefined) return undefined;
+  if (!usage.windows.some((window) => window.usedPercent >= FULL_USAGE_PERCENT)) return undefined;
+
+  const balance = Number(credits.balance.trim());
+  if (!Number.isFinite(balance) || balance <= 0) return undefined;
+
+  const estimate = formatDollarEstimate(credits.balance);
+  if (estimate === undefined) return undefined;
+  return fg("text", `$${estimate}(${formatAmount(credits.balance)})`);
 }
 
 function renderCredits(credits: CodexCredits, fg: ThemeFg): string {

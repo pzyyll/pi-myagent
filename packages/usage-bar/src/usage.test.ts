@@ -203,6 +203,44 @@ describe("parseCodexPlanUsage", () => {
 });
 
 describe("renderCodexUsage", () => {
+  it("shows positive credits after a usage window reaches 100%", () => {
+    const u = parseCodexUsage(
+      payload(
+        {
+          secondary_window: window({
+            used_percent: 100,
+            limit_window_seconds: 604_800,
+            reset_after_seconds: 414_000,
+          }),
+        },
+        { credits: { has_credits: true, unlimited: false, balance: "1003.48" } },
+      ),
+      NOW,
+    );
+
+    expect(renderCodexUsage(u, id)).toBe("Codex $40.14(1,003.48) W ████████ 100% ⟳ 4d 19h");
+  });
+
+  it("hides credits before 100% or when the balance is empty", () => {
+    const belowLimit = parseCodexUsage(
+      payload(
+        { secondary_window: window({ used_percent: 99, limit_window_seconds: 604_800 }) },
+        { credits: { has_credits: true, unlimited: false, balance: "1003.48" } },
+      ),
+      NOW,
+    );
+    const emptyBalance = parseCodexUsage(
+      payload(
+        { secondary_window: window({ used_percent: 100, limit_window_seconds: 604_800 }) },
+        { credits: { has_credits: true, unlimited: false, balance: "0" } },
+      ),
+      NOW,
+    );
+
+    expect(renderCodexUsage(belowLimit, id)).toBe("Codex W ████████ 99% ⟳ 2h");
+    expect(renderCodexUsage(emptyBalance, id)).toBe("Codex W ████████ 100% ⟳ 2h");
+  });
+
   it("renders both windows with bars, percentages, and reset text", () => {
     const u = parseCodexUsage(
       payload({
