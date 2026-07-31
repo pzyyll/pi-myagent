@@ -1,6 +1,5 @@
 // ABOUTME: Registers SuperGrok subscription OAuth via cli-chat-proxy, separate from built-in xai.
 // ABOUTME: Pi 0.80.8+ refreshModels + readStoredCredential; auth stays in ~/.pi/agent/auth.json.
-import { execFileSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { URLSearchParams } from "node:url";
 import type { Api, Model, OAuthCredentials, OAuthLoginCallbacks, RefreshModelsContext } from "@earendil-works/pi-ai";
@@ -33,37 +32,14 @@ import {
   type SuperGrokCredentials,
 } from "./grok-auth";
 import { loadModelsCatalogFromCache, saveModelsCatalogToCache } from "./models-cache";
-import { grokAgentIdPath, grokHome, OIDC_CLIENT_ID, OIDC_ISSUER, piGrokAgentIdPath } from "./paths";
+import { grokAgentIdPath, OIDC_CLIENT_ID, OIDC_ISSUER, piGrokAgentIdPath } from "./paths";
 
 const CLIENT_ID = OIDC_CLIENT_ID;
-// Resolve the installed grok CLI version so the proxy attributes requests to a
-// real Grok Build client version. Falls back if grok isn't discoverable.
-const GROK_VERSION_FALLBACK = "0.2.101";
+// Lockstepped grok-build CLI version sent as x-grok-client-version header.
+const GROK_CLIENT_VERSION = "0.2.117";
 
-function resolveGrokVersion(): string {
-  const home = grokHome();
-  const candidates = ["grok", `${home}/bin/grok`];
-  for (const bin of candidates) {
-    try {
-      const out = execFileSync(bin, ["--version"], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: 5_000,
-      });
-      const match = out.match(/(\d+\.\d+\.\d+(?:-[^\s)]+)?)/);
-      if (match) return match[1];
-    } catch {
-      // grok not found at this candidate path; try the next.
-    }
-  }
-  return GROK_VERSION_FALLBACK;
-}
-
-// Lazy: avoid execFileSync / disk I/O during extension module import.
-let clientVersion: string | undefined;
 function getClientVersion(): string {
-  clientVersion ??= resolveGrokVersion();
-  return clientVersion;
+  return GROK_CLIENT_VERSION;
 }
 
 // pi renders the device code + URL in its TUI, matching grok-build's `Ui` surface.
@@ -638,6 +614,7 @@ export function applyGrokBuildProductHeaders(
     modelId?: string;
     agentId?: string;
     accessToken?: string;
+    turnIdx?: string;
   },
 ): void {
   if (opts.convId) headers["x-grok-conv-id"] = opts.convId;
@@ -645,6 +622,7 @@ export function applyGrokBuildProductHeaders(
   if (opts.sessionId) headers[SESSION_ID_HEADER] = opts.sessionId;
   if (opts.modelId) headers[MODEL_OVERRIDE_HEADER] = opts.modelId;
   if (opts.agentId) headers["x-grok-agent-id"] = opts.agentId;
+  if (opts.turnIdx) headers["x-grok-turn-idx"] = opts.turnIdx;
   if (opts.accessToken) {
     const userId = peekJwtUserId(opts.accessToken);
     if (userId) headers[USER_ID_HEADER] = userId;
@@ -802,6 +780,11 @@ export default function (pi: ExtensionAPI) {
   // Catalog refresh is owned by Pi (register offline refresh, /model, pi update --models).
   // Login/token refresh still warm ~/.pi/agent/grok_models_cache.json.
 
+  let turnIndex = 0;
+  pi.on("turn_start", (event) => {
+    turnIndex = event.turnIndex;
+  });
+
   pi.on("before_provider_request", (event, ctx) => {
     if (ctx.model?.provider !== PROVIDER_ID) return;
     return alignGrokBuildResponsesPayload(event.payload, { modelId: ctx.model.id });
@@ -823,6 +806,7 @@ export default function (pi: ExtensionAPI) {
       modelId: ctx.model.id,
       agentId: getAgentId(),
       accessToken: storedAccessToken(),
+      turnIdx: String(turnIndex),
     });
 
     // Proxy-specific headers only when routing to cli-chat-proxy / loopback.
