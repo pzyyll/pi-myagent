@@ -219,6 +219,8 @@ describe("renderCodexUsage", () => {
     );
 
     expect(renderCodexUsage(u, id)).toBe("Codex $40.14(1,003.48) W ████████ 100% ⟳ 4d 19h");
+    const marker = (color: ThemeColorName, text: string) => `<${color}>${text}</${color}>`;
+    expect(renderCodexUsage(u, marker)).toContain("<dim>$40.14(1,003.48)</dim>");
   });
 
   it("hides credits before 100% or when the balance is empty", () => {

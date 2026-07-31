@@ -313,7 +313,7 @@ function renderStatusCredits(usage: CodexUsage, fg: ThemeFg): string | undefined
 
   const estimate = formatDollarEstimate(credits.balance);
   if (estimate === undefined) return undefined;
-  return fg("text", `$${estimate}(${formatAmount(credits.balance)})`);
+  return fg("dim", `$${estimate}(${formatAmount(credits.balance)})`);
 }
 
 function renderCredits(credits: CodexCredits, fg: ThemeFg): string {
