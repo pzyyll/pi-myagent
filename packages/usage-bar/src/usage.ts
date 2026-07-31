@@ -60,6 +60,8 @@ export interface CodexPlanUsage {
 const FIVE_HOURS_SECONDS = 5 * 60 * 60; // 18000
 const SEVEN_DAYS_SECONDS = 7 * 24 * 60 * 60; // 604800
 const DURATION_TOLERANCE_SECONDS = 60;
+const CREDITS_PER_DOLLAR = 25;
+const USD_DECIMAL_PLACES = 2;
 const SECONDS_PER_DAY = 86_400;
 const SECONDS_PER_HOUR = 3_600;
 const SECONDS_PER_MINUTE = 60;
@@ -298,8 +300,21 @@ function parseResetsIn(obj: Record<string, unknown>, now: number): string | unde
 function renderCredits(credits: CodexCredits, fg: ThemeFg): string {
   if (credits.unlimited) return fg("success", "Unlimited");
   if (!credits.hasCredits) return fg("dim", "none");
-  if (credits.balance) return fg("text", `${formatAmount(credits.balance)} credits`);
+  if (credits.balance) {
+    const estimate = formatDollarEstimate(credits.balance);
+    const estimateText = estimate === undefined ? "" : ` (~$${estimate})`;
+    return fg("text", `${formatAmount(credits.balance)} credits${estimateText}`);
+  }
   return fg("text", "available");
+}
+
+function formatDollarEstimate(raw: string): string | undefined {
+  const credits = Number(raw.trim());
+  if (!Number.isFinite(credits)) return undefined;
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: USD_DECIMAL_PLACES,
+    maximumFractionDigits: USD_DECIMAL_PLACES,
+  }).format(credits / CREDITS_PER_DOLLAR);
 }
 
 function renderMonthlyLimit(limit: CodexMonthlyLimit, fg: ThemeFg): string {

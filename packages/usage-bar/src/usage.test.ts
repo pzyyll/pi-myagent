@@ -280,7 +280,7 @@ describe("renderCodexPlanUsageDetails", () => {
             reset_after_seconds: 432_000,
           }),
         },
-        credits: { has_credits: true, unlimited: false, balance: "10" },
+        credits: { has_credits: true, unlimited: false, balance: "1003.48" },
         spend_control: {
           individual_limit: {
             limit: "25000",
@@ -300,7 +300,7 @@ describe("renderCodexPlanUsageDetails", () => {
     expect(lines).toContain("Rate limits");
     expect(lines.some((line) => line.includes("5h") && line.includes("38%"))).toBe(true);
     expect(lines.some((line) => line.includes("W") && line.includes("75%"))).toBe(true);
-    expect(lines).toContain("Credits  10 credits");
+    expect(lines).toContain("Credits  1,003.48 credits (~$40.14)");
     expect(
       lines.some((line) => line.startsWith("Monthly") && line.includes("32%") && line.includes("8,000 / 25,000")),
     ).toBe(true);
