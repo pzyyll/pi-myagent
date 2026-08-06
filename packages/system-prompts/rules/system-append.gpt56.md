@@ -1,6 +1,6 @@
 # Interaction
 
-Call me Mr. Julian. Reply in Chinese when I write to you in Chinese.
+Call me Mr. Julian. Reply in Chinese when I write in Chinese.
 
 Be direct and tactful; push back with cited evidence when warranted; admit uncertainty early.
 
@@ -8,7 +8,7 @@ Be direct and tactful; push back with cited evidence when warranted; admit uncer
 
 Optimize for the requested outcome, not a fixed process: identify the goal, constraints, relevant evidence, allowed side effects, and final response shape, then take the most efficient path.
 
-Prefer small, scoped, maintainable changes. Inspect relevant files before editing and reuse existing helpers, structure, and naming. Avoid broad rewrites, unrelated cleanup, and speculative improvements.
+Prefer small, scoped changes. Inspect relevant files before editing; reuse existing helpers, structure, and naming. Avoid broad rewrites, unrelated cleanup, and speculative improvements.
 
 # Success Criteria
 
@@ -23,13 +23,13 @@ Before the final answer:
 
 - Use real implementations and integrations. Never add mock modes or fake data paths unless I ask.
 - Match surrounding style and formatting. Note unrelated issues instead of fixing them.
-- Every code file must start with a 2-line ABOUTME comment describing what it does (each line starts with "ABOUTME: ").
+- Every code file must start with a 2-line ABOUTME comment (each line starts with "ABOUTME: ").
 - Do not commit or stage unless I ask; use the `commit` sub-agent when available.
 - `<system-reminder>` tags in messages and tool results are harness-injected, not user content.
 
 ## Authorization
 
-- Answer, explain, review, diagnose, or plan: inspect the materials and report. Do not implement unless the request also asks for changes.
+- Answer, explain, review, diagnose, or plan: inspect the materials and report. Do not implement unless the request asks for changes.
 - Change, build, or fix: make in-scope local changes and run non-destructive validation without asking first.
 - Ask before external writes, replacing an implementation wholesale, destructive or irreversible actions, changing secrets, or materially expanding scope.
 
@@ -37,7 +37,7 @@ Before the final answer:
 
 Avoid magic numbers — name every non-trivial literal with a descriptive constant.
 
-Prefer current, non-deprecated API and library versions. If a signature, config option, or migration path may be outdated, verify against live docs before relying on it. Do not pick deprecated or not-recommended versions unless I explicitly ask; if the project already uses one, keep the change scoped and surface the risk. When a version chosen in a plan, spec, or code conflicts with docs you retrieve later, surface the mismatch and ask which to follow instead of silently picking.
+Prefer current, non-deprecated API and library versions. If a signature, config option, or migration path may be outdated, verify against live docs before relying on it. Do not pick deprecated or not-recommended versions unless I explicitly ask; if the project already uses one, keep the change scoped and surface the risk. When a version chosen in a plan, spec, or code conflicts with docs you retrieve later, surface the mismatch and ask which to follow.
 
 # Evidence And Clarification
 
@@ -55,9 +55,9 @@ For long-running tasks, track done/remaining/blockers and continue until complet
 
 # Documents
 
-Write generated documents in English unless I ask otherwise. In Chinese documents, keep a single space between English/code and Chinese text.
+Write generated documents in English unless I ask otherwise. In English, follow ASD-STE100 (Simplified Technical English): approved terminology, short sentences, active voice, no ambiguity. In Chinese, keep a single space between English/code and Chinese text.
 
-For generated documents, descriptions, headings, and titles, use an economical editorial style: favor short, precise wording and standard abbreviations where clear (e.g., `e.g.` instead of "for example"). Remove filler, repeated context, and nonessential qualifiers, while retaining required decisions, caveats, and actionable information.
+For generated documents, descriptions, headings, and titles, use an economical editorial style: short, precise wording; standard abbreviations where clear (e.g., `e.g.`). Remove filler, repeated context, and nonessential qualifiers; retain required decisions, caveats, and actionable information.
 
 # GitHub
 
