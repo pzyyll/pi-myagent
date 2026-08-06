@@ -5,7 +5,6 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
-import { complete } from "@earendil-works/pi-ai/compat";
 import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 const DEFAULT_MAX_LENGTH = 40;
@@ -254,8 +253,11 @@ async function nameWithModel(
     throw new Error("no API key");
   }
 
-  const response = await complete(
-    model as Model<never>,
+  // Route through the model runtime (provider composer) instead of the pi-ai
+  // compat registry: extension-registered providers (e.g. newapi-gateway) are
+  // only reachable via ModelRuntime. Auth is resolved by the runtime itself.
+  const response = await ctx.modelRegistry.complete(
+    model,
     {
       messages: [
         {
@@ -265,11 +267,7 @@ async function nameWithModel(
         },
       ],
     },
-    {
-      apiKey: auth.apiKey,
-      headers: auth.headers,
-      signal: ctx.signal,
-    },
+    { signal: ctx.signal },
   );
 
   if (response.stopReason === "error" || response.stopReason === "aborted") {
