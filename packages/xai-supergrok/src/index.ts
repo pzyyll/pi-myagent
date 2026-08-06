@@ -543,7 +543,7 @@ async function refreshAccessToken(
   return parseJson<XaiTokenResponse>(response);
 }
 
-async function refreshXaiToken(credentials: OAuthCredentials): Promise<OAuthCredentials> {
+async function refreshXaiToken(credentials: OAuthCredentials, signal: AbortSignal): Promise<OAuthCredentials> {
   // Pi-owned refresh only — do not read/write ~/.grok/auth.json.
   const current = credentials as SuperGrokCredentials;
   const refreshToken = current.refresh;
@@ -552,6 +552,7 @@ async function refreshXaiToken(credentials: OAuthCredentials): Promise<OAuthCred
   const tokens = await refreshAccessToken(refreshToken, {
     principalType: current.principalType,
     principalId: current.principalId,
+    signal,
   });
   if (!tokens.access_token) throw new Error("xAI token refresh response is missing access_token");
 
@@ -569,7 +570,7 @@ async function refreshXaiToken(credentials: OAuthCredentials): Promise<OAuthCred
     refreshed.expires = expiresAt(tokens.expires_in);
   }
 
-  return refreshModelsCache(refreshed);
+  return refreshModelsCache(refreshed, signal);
 }
 
 /**
@@ -771,6 +772,7 @@ export default function (pi: ExtensionAPI) {
     refreshModels: refreshXaiModels,
     oauth: {
       name: "xAI SuperGrok (Subscription OAuth)",
+      isSubscription: true,
       login: loginXai,
       refreshToken: refreshXaiToken,
       getApiKey: (credentials) => credentials.access,
