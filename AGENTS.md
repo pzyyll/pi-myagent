@@ -19,6 +19,7 @@ Implement features and themes that work correctly in Pi. Before acting, identify
 - Match surrounding style and formatting
 - Make the smallest reasonable change that solves the task
 - Do not introduce mock modes or fake data paths
+- Put package tests under `packages/*/tests/` (not next to `src/`)
 
 # Commands
 
