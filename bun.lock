@@ -46,13 +46,6 @@
         "@earendil-works/pi-coding-agent": "*",
       },
     },
-    "packages/ssh-remote": {
-      "name": "@myagent/ssh-remote",
-      "version": "0.1.0",
-      "peerDependencies": {
-        "@earendil-works/pi-coding-agent": "*",
-      },
-    },
     "packages/system-prompts": {
       "name": "@myagent/system-prompts",
       "version": "0.1.0",
@@ -213,8 +206,6 @@
     "@myagent/claude-indicator": ["@myagent/claude-indicator@workspace:packages/claude-indicator"],
 
     "@myagent/responsive-footer": ["@myagent/responsive-footer@workspace:packages/responsive-footer"],
-
-    "@myagent/ssh-remote": ["@myagent/ssh-remote@workspace:packages/ssh-remote"],
 
     "@myagent/system-prompts": ["@myagent/system-prompts@workspace:packages/system-prompts"],
 
