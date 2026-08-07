@@ -1,7 +1,7 @@
 // ABOUTME: Tests official xAI prefab pricing lookup and product-id aliases.
 // ABOUTME: Rates must match docs.x.ai short-context Text API table.
 import { describe, expect, it } from "bun:test";
-import { OFFICIAL_XAI_PRICING, resolveXaiModelCost, ZERO_COST } from "./pricing";
+import { OFFICIAL_XAI_PRICING, resolveXaiModelCost, ZERO_COST } from "../src/pricing";
 
 describe("resolveXaiModelCost", () => {
   it("returns official short-context rates for grok-4.5", () => {

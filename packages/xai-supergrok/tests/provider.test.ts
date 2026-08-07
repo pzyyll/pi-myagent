@@ -16,10 +16,10 @@ import {
   PROVIDER_ID,
   refreshXaiModels,
   SEED_MODELS,
-} from "./index";
-import type { CatalogModel } from "./catalog";
-import { saveModelsCatalogToCache } from "./models-cache";
-import { grokModelsCachePath } from "./paths";
+} from "../src/index";
+import type { CatalogModel } from "../src/catalog";
+import { saveModelsCatalogToCache } from "../src/models-cache";
+import { grokModelsCachePath } from "../src/paths";
 
 function offlineRefreshContext(): RefreshModelsContext {
   return {

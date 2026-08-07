@@ -1,7 +1,7 @@
 // ABOUTME: Verifies bounded exponential-backoff behavior for transient network failures.
 // ABOUTME: Covers recovery, exhausted attempts, and cancellation between attempts.
 import { describe, expect, it } from "bun:test";
-import { NETWORK_ATTEMPTS, RETRY_BASE_DELAY_MS, retryNetworkRequest } from "./retry";
+import { NETWORK_ATTEMPTS, RETRY_BASE_DELAY_MS, retryNetworkRequest } from "../src/retry";
 
 describe("retryNetworkRequest", () => {
   it("retries with exponential delays and returns a later success", async () => {

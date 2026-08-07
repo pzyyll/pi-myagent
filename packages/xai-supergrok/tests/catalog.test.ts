@@ -16,7 +16,7 @@ import {
   peekJwtUserId,
   sanitizeModelsCatalog,
   thinkingLevelMapForCatalog,
-} from "./catalog";
+} from "../src/catalog";
 
 describe("FALLBACK_CATALOG", () => {
   it("includes grok-4.5 as a bake-in model when remote catalog is unavailable", () => {

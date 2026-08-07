@@ -5,7 +5,7 @@ import {
   renderCodexPlanUsageDetails,
   renderCodexUsage,
   type ThemeColorName,
-} from "./usage";
+} from "../src/usage";
 
 const NOW = 1_700_000_000_000;
 const id = (_c: string, t: string) => t;

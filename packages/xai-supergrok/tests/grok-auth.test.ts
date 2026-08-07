@@ -12,8 +12,8 @@ import {
   grokAuthToCredentials,
   importCredentialsFromGrokAuth,
   isGrokAuthExpired,
-} from "./grok-auth";
-import { authScopeKey } from "./paths";
+} from "../src/grok-auth";
+import { authScopeKey } from "../src/paths";
 
 function tempAuthPath(): { dir: string; path: string } {
   const dir = mkdtempSync(join(tmpdir(), "xai-supergrok-auth-"));

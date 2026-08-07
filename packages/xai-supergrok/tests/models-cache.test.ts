@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CatalogModel } from "./catalog";
+import type { CatalogModel } from "../src/catalog";
 import {
   buildModelsCacheMap,
   catalogFromCacheModelsMap,
@@ -12,7 +12,7 @@ import {
   loadModelsCatalogFromCache,
   MODELS_CACHE_TTL_MS,
   saveModelsCatalogToCache,
-} from "./models-cache";
+} from "../src/models-cache";
 
 const dirs: string[] = [];
 

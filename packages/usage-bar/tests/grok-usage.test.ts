@@ -1,8 +1,8 @@
 // ABOUTME: Tests SuperGrok billing payload parsing and footer/detail rendering.
 // ABOUTME: Covers credits, productUsage breakdown, prepaid/on-demand, and legacy fields.
 import { describe, expect, it } from "bun:test";
-import { parseGrokPlanUsage, renderGrokPlanUsageDetails, renderGrokUsage } from "./grok-usage";
-import type { ThemeColorName } from "./shared";
+import { parseGrokPlanUsage, renderGrokPlanUsageDetails, renderGrokUsage } from "../src/grok-usage";
+import type { ThemeColorName } from "../src/shared";
 
 const NOW = Date.parse("2026-04-01T12:00:00.000Z");
 const id = (_c: string, t: string) => t;
