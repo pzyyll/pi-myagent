@@ -1,0 +1,22 @@
+{
+  "name": "@myagent/ssh-remote",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pi extension that runs read/write/edit/bash/grep/find/ls tools on a remote machine via SSH (--ssh flag).",
+  "keywords": [
+    "pi-package",
+    "pi-extension"
+  ],
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}

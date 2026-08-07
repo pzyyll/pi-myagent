@@ -28,6 +28,7 @@
       "packages/claude-indicator",
       "packages/system-prompts",
       "packages/responsive-footer",
+      "packages/ssh-remote",
       "packages/tools-manager",
       "packages/mythemes",
       "packages/xai-supergrok",
