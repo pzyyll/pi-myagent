@@ -32,6 +32,11 @@ export interface UsageChannel {
   readonly id: string;
   readonly brand: string;
   readonly providers: readonly string[];
+  /**
+   * When true (default), only poll while the model is on an OAuth subscription session.
+   * Set false for API-key subscription channels such as OpenCode Go.
+   */
+  readonly requiresOAuth?: boolean;
   matches(provider: string): boolean;
   fetch(args: ChannelFetchArgs): Promise<ChannelFetchResult>;
 }

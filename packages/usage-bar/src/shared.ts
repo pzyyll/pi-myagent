@@ -1,5 +1,5 @@
 // ABOUTME: Shared usage-window types and compact bar rendering for all usage channels.
-// ABOUTME: Keeps footer/detail bars visually consistent across Codex and Grok providers.
+// ABOUTME: Keeps footer/detail bars visually consistent across Codex, Grok, and Go providers.
 export type ThemeColorName = "success" | "error" | "warning" | "muted" | "dim" | "text" | "accent";
 
 export type ThemeFg = (color: ThemeColorName, text: string) => string;

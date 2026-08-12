@@ -1,54 +1,43 @@
-// ABOUTME: SuperGrok OAuth usage channel via cli-chat-proxy billing credits API.
-// ABOUTME: Injects grok-build product headers; does not depend on xai-supergrok at runtime.
-import { parseGrokPlanUsage, renderGrokPlanUsageDetails, renderGrokUsage, type GrokPlanUsage } from "../grok-usage";
+// ABOUTME: OpenCode Go subscription usage channel via /zen/go/v1/usage.
+// ABOUTME: Uses the same API key as model requests (Bearer auth), not OAuth.
+import {
+  parseOpenCodeGoPlanUsage,
+  renderOpenCodeGoPlanUsageDetails,
+  renderOpenCodeGoUsage,
+  type OpenCodeGoPlanUsage,
+} from "../opencode-go-usage";
 import { retryNetworkRequest } from "../retry";
 import type { ChannelFetchArgs, ChannelFetchResult, ChannelUsageView, UsageChannel } from "./types";
 
-const PROVIDER_ID = "xai-supergrok";
-const BILLING_URL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
-const TOKEN_AUTH_HEADER = "X-XAI-Token-Auth";
-const TOKEN_AUTH_VALUE = "xai-grok-cli";
-const CLIENT_VERSION = "pi-usage-bar";
-const CLIENT_IDENTIFIER = "grok-shell";
-const CLIENT_MODE = "interactive";
+const PROVIDER_ID = "opencode-go";
+const ENDPOINT = "https://opencode.ai/zen/go/v1/usage";
 const FETCH_TIMEOUT_MS = 12_000;
 
-export const grokChannel: UsageChannel = {
+export const opencodeGoChannel: UsageChannel = {
   id: PROVIDER_ID,
-  brand: "Grok",
+  brand: "OpenCode Go",
   providers: [PROVIDER_ID],
-  requiresOAuth: true,
+  requiresOAuth: false,
   matches(provider: string) {
     return provider === PROVIDER_ID;
   },
   async fetch(args: ChannelFetchArgs): Promise<ChannelFetchResult> {
-    const accessToken = bearerToken(args.auth);
-    if (!accessToken) {
-      return { ok: false, error: "usage-bar: missing SuperGrok access token" };
+    const apiKey = bearerToken(args.auth);
+    if (!apiKey) {
+      return { ok: false, error: "usage-bar: missing OpenCode Go API key" };
     }
 
-    const userId = peekJwtUserId(accessToken);
     const headers: Record<string, string> = {
       Accept: "application/json",
-      Authorization: `Bearer ${accessToken}`,
-      [TOKEN_AUTH_HEADER]: TOKEN_AUTH_VALUE,
-      "x-grok-client-version": CLIENT_VERSION,
-      "x-grok-client-identifier": CLIENT_IDENTIFIER,
-      "x-grok-client-mode": CLIENT_MODE,
       ...args.auth.headers,
+      Authorization: `Bearer ${apiKey}`,
     };
-    // Ensure product auth wins over any weaker registry defaults.
-    headers[TOKEN_AUTH_HEADER] = TOKEN_AUTH_VALUE;
-    headers["Authorization"] = `Bearer ${accessToken}`;
-    if (userId && !hasHeader(headers, "x-userid")) {
-      headers["x-userid"] = userId;
-    }
 
     try {
       const result = await retryNetworkRequest(async () => {
         const controller = nestedAbort(args.signal, FETCH_TIMEOUT_MS);
         try {
-          const response = await (args.fetchImpl ?? fetch)(BILLING_URL, {
+          const response = await (args.fetchImpl ?? fetch)(ENDPOINT, {
             headers,
             signal: controller.signal,
           });
@@ -62,9 +51,9 @@ export const grokChannel: UsageChannel = {
       if (!result.response.ok) {
         return { ok: false, error: `usage-bar: HTTP ${result.response.status}` };
       }
-      const usage = parseGrokPlanUsage(result.json, args.now);
+      const usage = parseOpenCodeGoPlanUsage(result.json, args.now);
       if (!usage.usable) {
-        return { ok: false, error: "usage-bar: unrecognized Grok usage payload" };
+        return { ok: false, error: "usage-bar: unrecognized OpenCode Go usage payload" };
       }
       return { ok: true, view: toView(usage) };
     } catch (err) {
@@ -79,14 +68,14 @@ export const grokChannel: UsageChannel = {
   },
 };
 
-function toView(usage: GrokPlanUsage): ChannelUsageView {
+function toView(usage: OpenCodeGoPlanUsage): ChannelUsageView {
   return {
     channelId: PROVIDER_ID,
-    brand: "Grok",
+    brand: "Go",
     windows: usage.windows,
     usable: usage.usable,
-    renderDetails: (fg) => renderGrokPlanUsageDetails(usage, fg),
-    renderStatus: (fg) => renderGrokUsage(usage, fg),
+    renderDetails: (fg) => renderOpenCodeGoPlanUsageDetails(usage, fg),
+    renderStatus: (fg) => renderOpenCodeGoUsage(usage, fg),
   };
 }
 
@@ -97,26 +86,6 @@ function bearerToken(auth: ChannelFetchArgs["auth"]): string | undefined {
     if (match?.[1]) return match[1].trim();
   }
   return auth.apiKey?.trim() || undefined;
-}
-
-function peekJwtUserId(token: string): string | undefined {
-  const parts = token.split(".");
-  if (parts.length < 2 || !parts[1]) return undefined;
-  try {
-    const padded = parts[1].replace(/-/g, "+").replace(/_/g, "/") + "===".slice((parts[1].length + 3) % 4);
-    const payload = JSON.parse(atob(padded)) as Record<string, unknown>;
-    const candidates = [payload["sub"], payload["user_id"], payload["userId"]];
-    for (const value of candidates) {
-      if (typeof value === "string" && value.trim()) return value.trim();
-    }
-    return undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function hasHeader(headers: Record<string, string>, name: string): boolean {
-  return findHeader(headers, name) !== undefined;
 }
 
 function findHeader(headers: Record<string, string>, name: string): string | undefined {
