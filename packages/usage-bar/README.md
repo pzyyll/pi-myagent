@@ -2,10 +2,11 @@
 
 A Pi extension that shows subscription usage as a footer status bar and detailed `/usages` panel. It supports multiple channels behind one pipeline:
 
-| Channel   | Provider id     | Source                                                          |
-| --------- | --------------- | --------------------------------------------------------------- |
-| **Codex** | `openai-codex`  | `GET https://chatgpt.com/backend-api/wham/usage`                |
-| **Grok**  | `xai-supergrok` | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
+| Channel         | Provider id     | Auth    | Source                                                          |
+| --------------- | --------------- | ------- | --------------------------------------------------------------- |
+| **Codex**       | `openai-codex`  | OAuth   | `GET https://chatgpt.com/backend-api/wham/usage`                |
+| **Grok**        | `xai-supergrok` | OAuth   | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
+| **OpenCode Go** | `opencode-go`   | API key | `GET https://opencode.ai/zen/go/v1/usage`                       |
 
 The footer appears only while a matching model is active. `/usages` is independent of the current model: it opens a channel select list and queries the chosen channel on demand.
 
@@ -30,23 +31,36 @@ Grok W ███░░░░░ 42% ⟳ 4d 12h
 - `W` / `M` / `Credits` — included credit window from `creditUsagePercent` (or legacy `used`/`monthlyLimit`).
 - Detail view also shows prepaid balance, on-demand cap/used, period end, subscription tier, and `productUsage` breakdown (API / Build / Chat / Imagine / Voice) when present.
 
+### OpenCode Go
+
+```
+Go 5h ░░░░░░░░ 0% ⟳ 4h 57m  W ░░░░░░░░ 0% ⟳ 4d 14h  M ██░░░░░░ 31% ⟳ 18d 23h
+```
+
+- `5h` - rolling five-hour window (`usage.rolling`).
+- `W` - weekly window (`usage.weekly`).
+- `M` - monthly window (`usage.monthly`).
+- Auth is the same OpenCode Go API key used for model requests (`Authorization: Bearer …`).
+- Detail view flags any window with `status: "rate-limited"`.
+
 Bar color: green below 70%, yellow 70–89%, red at 90%+.
 
 ## Behavior
 
-- Active footer channel follows the current model provider (`openai-codex` or `xai-supergrok`) **only when that provider is authenticated via OAuth** (subscription session).
-- API-key / BYOK mode for the same provider does not poll: subscription usage endpoints reject API keys with HTTP 401.
+- Active footer channel follows the current model provider.
+- OAuth channels (`openai-codex`, `xai-supergrok`) poll only while that provider is authenticated via OAuth. API-key / BYOK mode for those providers does not poll: their billing APIs reject API keys with HTTP 401.
+- OpenCode Go (`opencode-go`) polls with the configured API key.
 - Fetches on session start and model selection, then polls every 2 minutes.
-- Resolves credentials through Pi's model registry (`getApiKeyAndHeaders`), so Pi handles OAuth refresh for both Codex and SuperGrok.
+- Resolves credentials through Pi's model registry (`getApiKeyAndHeaders`), so Pi handles OAuth refresh for Codex and SuperGrok.
 - Grok requests inject cli-chat-proxy product headers (`X-XAI-Token-Auth: xai-grok-cli`, client version/identifier/mode, optional `x-userid` from JWT).
 - Transient network failures and request timeouts are retried up to three total attempts with exponential backoff.
 - A network warning is shown only after retries fail. The last successful status is kept until the next successful fetch or provider switch.
 
 ## Commands
 
-| Command   | Description                                                                                                                                                        |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/usages` | Open a select list of supported channels (Codex, SuperGrok) and show detailed plan usage for the chosen channel. Works regardless of the currently selected model. |
+| Command   | Description                                                                                                                                                           |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/usages` | Open a select list of supported channels (Codex, SuperGrok, OpenCode Go) and show detailed plan usage for the chosen channel. Works regardless of the selected model. |
 
 On success it opens a dismissible detail panel (enter/esc) in TUI mode; otherwise it sends a plain-text summary notification.
 
@@ -54,4 +68,4 @@ On success it opens a dismissible detail panel (enter/esc) in TUI mode; otherwis
 
 The status is published under the `usage-bars` key, which `@myagent/responsive-footer` already renders as a dedicated footer line. No configuration file is required.
 
-SuperGrok login / model catalog lives in `@myagent/xai-supergrok`. This package only consumes the stored OAuth credentials through the model registry.
+SuperGrok login / model catalog lives in `@myagent/xai-supergrok`. This package only consumes stored credentials through the model registry.

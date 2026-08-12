@@ -13,6 +13,7 @@ export const codexChannel: UsageChannel = {
   id: "openai-codex",
   brand: "Codex",
   providers: [PROVIDER_ID],
+  requiresOAuth: true,
   matches(provider: string) {
     return provider === PROVIDER_ID;
   },

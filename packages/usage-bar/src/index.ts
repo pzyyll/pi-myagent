@@ -6,6 +6,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import { Container, Text } from "@earendil-works/pi-tui";
 import {
   CHANNELS,
+  channelRequiresOAuth,
   findChannelForModel,
   resolveModelForChannel,
   type ChannelUsageView,
@@ -139,10 +140,11 @@ export default function (pi: ExtensionAPI) {
   };
 
   const sync = (ctx: ExtensionContext, model: Model<any> | undefined) => {
-    // Subscription usage endpoints need OAuth session tokens. API-key mode for the
-    // same provider (e.g. xai-supergrok BYOK) will 401 against billing APIs — skip.
-    const channel = model && ctx.modelRegistry.isUsingOAuth(model) ? findChannelForModel(model) : undefined;
-    if (model && channel) {
+    // OAuth-backed channels (Codex / SuperGrok) need a subscription session; API-key
+    // BYOK for those providers 401s billing APIs. OpenCode Go uses its API key.
+    const channel = model ? findChannelForModel(model) : undefined;
+    const authOk = channel && (!channelRequiresOAuth(channel) || ctx.modelRegistry.isUsingOAuth(model!));
+    if (model && channel && authOk) {
       generation++;
       abort?.abort();
       if (Date.now() - lastFetchAt > FRESH_FETCH_MS) void refresh(ctx, channel, model);
@@ -206,7 +208,11 @@ export default function (pi: ExtensionAPI) {
       if (!channel) return;
 
       const model = resolveModelForChannel(channel, ctx.modelRegistry.getAvailable(), ctx.model);
-      if (!model || !ctx.modelRegistry.isUsingOAuth(model)) {
+      if (!model) {
+        ctx.ui.notify(`usage-bar: no configured model for ${channel.brand}`, "info");
+        return;
+      }
+      if (channelRequiresOAuth(channel) && !ctx.modelRegistry.isUsingOAuth(model)) {
         ctx.ui.notify(`usage-bar: no OAuth subscription credentials for ${channel.brand}`, "info");
         return;
       }

@@ -1,13 +1,19 @@
 // ABOUTME: Registers usage channels and resolves models for footer polling and /usages.
-// ABOUTME: Codex and SuperGrok share the same footer/command pipeline through this registry.
+// ABOUTME: Codex, SuperGrok, and OpenCode Go share the same footer/command pipeline.
 import type { Model } from "@earendil-works/pi-ai";
 import { codexChannel } from "./codex";
 import { grokChannel } from "./grok";
+import { opencodeGoChannel } from "./opencode-go";
 import type { UsageChannel } from "./types";
 
 export type { ChannelFetchResult, ChannelUsageView, ResolvedAuth, UsageChannel } from "./types";
 
-export const CHANNELS: readonly UsageChannel[] = [codexChannel, grokChannel];
+export const CHANNELS: readonly UsageChannel[] = [codexChannel, grokChannel, opencodeGoChannel];
+
+/** True when the channel needs an OAuth subscription session (default). */
+export function channelRequiresOAuth(channel: UsageChannel): boolean {
+  return channel.requiresOAuth !== false;
+}
 
 export function findChannelByProvider(provider: string | undefined): UsageChannel | undefined {
   if (!provider) return undefined;
