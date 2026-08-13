@@ -1,8 +1,12 @@
+// ABOUTME: Replaces Pi's footer so usage-bar and other statuses wrap on narrow terminals.
+// ABOUTME: Keeps the official usage stats and adds a system-prompt estimate as S5.2k.
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const ANSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 const USAGE_BARS_STATUS_KEYS = new Set(["usage-bars", "pi-usage-bars"]);
+const CHARS_PER_TOKEN = 4;
+const SYSTEM_PROMPT_STAT_PREFIX = "S";
 
 function stripAnsi(text: string): string {
   return text.replace(ANSI_RE, "");
@@ -50,7 +54,7 @@ function truncateToWidth(text: string, width: number, ellipsis = "..."): string 
   let output = "";
   let used = 0;
 
-  for (let i = 0; i < text.length;) {
+  for (let i = 0; i < text.length; ) {
     const ansi = text.slice(i).match(/^\x1b\[[0-?]*[ -/]*[@-~]/);
     if (ansi) {
       output += ansi[0];
@@ -90,7 +94,7 @@ function wrapStatusItems(items: string[], width: number): string[] {
   };
 
   const appendText = (text: string) => {
-    for (let i = 0; i < text.length;) {
+    for (let i = 0; i < text.length; ) {
       const ansi = text.slice(i).match(/^\x1b\[[0-?]*[ -/]*[@-~]/);
       if (ansi) {
         line += ansi[0];
@@ -136,6 +140,10 @@ function formatTokens(count: number): string {
   if (count < 1000000) return `${Math.round(count / 1000)}k`;
   if (count < 10000000) return `${(count / 1000000).toFixed(1)}M`;
   return `${Math.round(count / 1000000)}M`;
+}
+
+function estimateTokens(text: string): number {
+  return Math.round(text.length / CHARS_PER_TOKEN);
 }
 
 function formatCwdForFooter(cwd: string, home: string | undefined): string {
@@ -212,6 +220,10 @@ function renderDefaultFooterLines(ctx: any, theme: any, footerData: any, width: 
   }
 
   const statsParts: string[] = [];
+  const systemPrompt = typeof ctx.getSystemPrompt === "function" ? ctx.getSystemPrompt() : "";
+  if (systemPrompt) {
+    statsParts.push(`${SYSTEM_PROMPT_STAT_PREFIX}${formatTokens(estimateTokens(systemPrompt))}`);
+  }
   if (totalInput) statsParts.push(`↑${formatTokens(totalInput)}`);
   if (totalOutput) statsParts.push(`↓${formatTokens(totalOutput)}`);
   if (totalCacheRead) statsParts.push(`R${formatTokens(totalCacheRead)}`);

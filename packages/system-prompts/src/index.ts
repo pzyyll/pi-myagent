@@ -1,10 +1,11 @@
+// ABOUTME: Appends developer instructions to the Pi system prompt before each run.
+// ABOUTME: Injects rules/system-append.gpt56.md ahead of <project_context> when present.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const PACKAGE_ROOT = dirname(require.resolve("../package.json"));
 const RULES_FILE = join(PACKAGE_ROOT, "rules", "system-append.gpt56.md");
-const STATUS_KEY = "system-prompt"
 
 let cachedRules: string | null | undefined;
 
@@ -22,15 +23,6 @@ ${cachedRules}
 
 export default function (pi: ExtensionAPI) {
   const marker = "<project_context>";
-
-	pi.on("agent_start", (_event, ctx) => {
-		const prompt = ctx.getSystemPrompt();
-		ctx.ui.setStatus(STATUS_KEY, `System Prompt: ${prompt.length} chars`);
-	});
-
-	pi.on("session_shutdown", (_event, ctx) => {
-		ctx.ui.setStatus(STATUS_KEY, undefined);
-	});
 
   pi.on("before_agent_start", (event) => {
     const rules = loadRules();
