@@ -5,7 +5,7 @@ import { CustomEditor, type ExtensionAPI, type KeybindingsManager } from "@earen
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
 
 // "❯","»"
-const PROMPT = "»";
+const PROMPT = "❯";
 const INDENT = " ";
 const PREFIX_WIDTH = 1;
 
