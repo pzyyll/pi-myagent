@@ -36,7 +36,7 @@ import { grokAgentIdPath, OIDC_CLIENT_ID, OIDC_ISSUER, piGrokAgentIdPath } from 
 
 const CLIENT_ID = OIDC_CLIENT_ID;
 // Lockstepped grok-build CLI version sent as x-grok-client-version header.
-const GROK_CLIENT_VERSION = "0.2.117";
+const GROK_CLIENT_VERSION = "1.0.46";
 
 function getClientVersion(): string {
   return GROK_CLIENT_VERSION;
@@ -73,8 +73,9 @@ const CLIENT_IDENTIFIER_HEADER = "x-grok-client-identifier";
 const TOKEN_URL = "https://auth.x.ai/oauth2/token";
 const DEVICE_AUTHORIZATION_URL = "https://auth.x.ai/oauth2/device/code";
 const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
-// Frozen xAI OAuth2 client scope contract (8 scopes) - server expects exactly this set.
-const SCOPE = "openid profile email offline_access grok-cli:access api:access conversations:read conversations:write";
+// Match grok-build's default personal OAuth2 scopes.
+const SCOPE =
+  "openid profile email offline_access grok-cli:access api:access conversations:read conversations:write workspaces:read workspaces:write";
 
 const DEVICE_CODE_DEFAULT_INTERVAL_MS = 5_000;
 const DEVICE_CODE_MIN_INTERVAL_MS = 1_000;
@@ -615,6 +616,7 @@ export function applyGrokBuildProductHeaders(
     modelId?: string;
     agentId?: string;
     accessToken?: string;
+    userId?: string;
     turnIdx?: string;
   },
 ): void {
@@ -624,10 +626,8 @@ export function applyGrokBuildProductHeaders(
   if (opts.modelId) headers[MODEL_OVERRIDE_HEADER] = opts.modelId;
   if (opts.agentId) headers["x-grok-agent-id"] = opts.agentId;
   if (opts.turnIdx) headers["x-grok-turn-idx"] = opts.turnIdx;
-  if (opts.accessToken) {
-    const userId = peekJwtUserId(opts.accessToken);
-    if (userId) headers[USER_ID_HEADER] = userId;
-  }
+  const userId = opts.userId || (opts.accessToken ? peekJwtUserId(opts.accessToken) : undefined);
+  if (userId) headers[USER_ID_HEADER] = userId;
 }
 
 /** True for cli-chat-proxy production host, or loopback (local mock servers). */
@@ -800,14 +800,18 @@ export default function (pi: ExtensionAPI) {
     event.headers["x-grok-client-version"] = getClientVersion();
     // sampler always injects this, even when SamplerConfig.client_identifier is None.
     event.headers[CLIENT_IDENTIFIER_HEADER] = CLIENT_IDENTIFIER;
+    event.headers[CLIENT_MODE_HEADER] = CLIENT_MODE_VALUE;
 
+    const credential = readStoredCredential(PROVIDER_ID);
+    const oauthCredential = credential?.type === "oauth" ? (credential as SuperGrokCredentials) : undefined;
     applyGrokBuildProductHeaders(event.headers, {
       convId: ctx.sessionManager.getSessionId(),
       reqId: `xai-perm-auto-${crypto.randomUUID()}`,
       sessionId: ctx.sessionManager.getSessionId(),
       modelId: ctx.model.id,
       agentId: getAgentId(),
-      accessToken: storedAccessToken(),
+      accessToken: oauthCredential?.access,
+      userId: oauthCredential?.userId,
       turnIdx: String(turnIndex),
     });
 
@@ -815,7 +819,6 @@ export default function (pi: ExtensionAPI) {
     if (isCliChatProxyUrl(ctx.model.baseUrl)) {
       event.headers[TOKEN_AUTH_HEADER] = TOKEN_AUTH_VALUE;
       event.headers[AUTHENTICATE_RESPONSE_HEADER] = AUTHENTICATE_RESPONSE_VALUE;
-      event.headers[CLIENT_MODE_HEADER] = CLIENT_MODE_VALUE;
     }
   });
 }
