@@ -11,7 +11,7 @@ This is intentionally separate from Pi's built-in **`xai`** provider:
 | Models          | Static built-in catalog                             | Dynamic entitlements via `/v1/models`                 |
 | Product headers | None                                                | grok-shell / cli-chat-proxy attribution               |
 
-Requires **Pi ≥ 0.80.8** (`refreshModels`, `readStoredCredential`).
+Requires **Pi ≥ 1.1.0** (Provider-local streaming and Pi's OpenAI Responses implementation).
 
 ## Usage
 
@@ -48,7 +48,9 @@ For public API-key / BYOK (or Pi's built-in xAI subscription against `api.x.ai`)
 
 ## Wire alignment with Grok Build (session OAuth)
 
-Requests use `api: "openai-responses"` against `cli-chat-proxy` and mirror grok-build's session path:
+Requests use `api: "openai-responses"` against `cli-chat-proxy` and mirror grok-build's session path. A Provider-local wrapper delegates streaming to Pi's OpenAI Responses implementation. It applies headers and payload rules to main sessions, `pi-agents` subagents, and direct model-runtime calls. It does not depend on main-session event hooks.
+
+The wrapper preserves cancellation, retries, custom fetch, and request observers. Payload observers receive the aligned body. Replacement bodies pass through alignment again before sending.
 
 **Body (Responses)**
 
@@ -68,9 +70,12 @@ Requests use `api: "openai-responses"` against `cli-chat-proxy` and mirror grok-
 
 **Headers**
 
-- Product: `x-grok-client-version`, `x-grok-client-identifier`, `x-grok-session-id`, `x-grok-model-override`, and `x-grok-user-id` (JWT `sub` when available).
-- cli-chat-proxy auth attribution: `X-XAI-Token-Auth: xai-grok-cli`, `x-authenticateresponse`, `x-grok-client-mode`.
-- OpenAI `session_id` header is off (`sessionAffinityFormat: "openai-nosession"`). Sticky routing is via `x-grok-session-id`, not body cache keys.
+- Fixed product headers: `User-Agent`, `x-grok-client-version: 1.0.46`, `x-grok-client-identifier: grok-shell`, and `x-grok-client-mode: interactive`.
+- Request attribution: `x-grok-conv-id`, `x-grok-req-id`, `x-grok-session-id`, `x-grok-model-override`, and `x-grok-agent-id`.
+- The session ID comes from the current request options, then a supplied `x-grok-session-id`, then a new UUID. Parallel subagents do not use the parent session ID.
+- On cli-chat-proxy, `x-grok-user-id` uses stored OAuth identity only when its access token matches the request token. Otherwise it uses the request token's JWT `sub`, when present.
+- cli-chat-proxy auth attribution: `X-XAI-Token-Auth: xai-grok-cli` and `x-authenticateresponse`. These headers are suppressed on public API and custom endpoints.
+- OpenAI `session_id` is suppressed (`sessionAffinityFormat: "openai-nosession"`). Sticky routing uses `x-grok-session-id`, not body cache keys.
 
 Prefix cache hits remain best-effort on the proxy/backend side; keep conversation prefixes stable across turns.
 
@@ -90,4 +95,4 @@ Unknown ids stay $0. This is list-price estimation only — SuperGrok subscripti
 - If refresh fails, run `/login xai-supergrok` (or re-import / re-OAuth) again because xAI refresh tokens may rotate.
 - Importing from `~/.grok/auth.json` copies tokens into Pi at that moment only. Later Grok Build rotations are **not** auto-adopted; re-run `/login` and choose import again if needed.
 - The login flow uses headless device-code OAuth; browser loopback OAuth is not exposed by Pi's current OAuth callback API.
-- Not every grok-build sampler header is mirrored (`x-grok-conv-id`, `x-grok-req-id`, `x-grok-agent-id`, turn/deployment ids) — only the product headers needed for session affinity and proxy auth.
+- Turn and deployment headers are not inferred from the parent session. Callers can supply them through request headers.

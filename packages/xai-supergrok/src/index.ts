@@ -1,8 +1,18 @@
 // ABOUTME: Registers SuperGrok subscription OAuth via cli-chat-proxy, separate from built-in xai.
-// ABOUTME: Pi 0.80.8+ refreshModels + readStoredCredential; auth stays in ~/.pi/agent/auth.json.
+// ABOUTME: Applies the subscription wire contract at the Provider layer; Pi owns OAuth credentials.
 import { setTimeout as sleep } from "node:timers/promises";
 import { URLSearchParams } from "node:url";
-import type { Api, Model, OAuthCredentials, OAuthLoginCallbacks, RefreshModelsContext } from "@earendil-works/pi-ai";
+import type {
+  Api,
+  Model,
+  OAuthCredentials,
+  OAuthLoginCallbacks,
+  OpenAIResponsesOptions,
+  RefreshModelsContext,
+  SimpleStreamOptions,
+  TranscriptContext,
+} from "@earendil-works/pi-ai";
+import { openAIResponsesApi } from "@earendil-works/pi-ai/compat";
 import {
   type ExtensionAPI,
   type ProviderModelConfig,
@@ -34,6 +44,7 @@ import {
 import { loadModelsCatalogFromCache, saveModelsCatalogToCache } from "./models-cache";
 import { grokAgentIdPath, OIDC_CLIENT_ID, OIDC_ISSUER, piGrokAgentIdPath } from "./paths";
 
+const OPENAI_RESPONSES_API = openAIResponsesApi();
 const CLIENT_ID = OIDC_CLIENT_ID;
 // Lockstepped grok-build CLI version sent as x-grok-client-version header.
 const GROK_CLIENT_VERSION = "1.0.46";
@@ -630,6 +641,75 @@ export function applyGrokBuildProductHeaders(
   if (userId) headers[USER_ID_HEADER] = userId;
 }
 
+function productHeaders(): Record<string, string> {
+  return {
+    "User-Agent": getUserAgent(),
+    "x-grok-client-version": getClientVersion(),
+    [CLIENT_IDENTIFIER_HEADER]: CLIENT_IDENTIFIER,
+    [CLIENT_MODE_HEADER]: CLIENT_MODE_VALUE,
+  };
+}
+
+function requestHeaders(model: Model<Api>, options: SimpleStreamOptions): Record<string, string | null> {
+  const headers: Record<string, string | null> = {};
+  for (const source of [model.headers, options.headers]) {
+    for (const [name, value] of Object.entries(source ?? {})) headers[name.toLowerCase()] = value;
+  }
+  delete headers["user-agent"];
+  Object.assign(headers, productHeaders());
+
+  const sessionId = options.sessionId || headers[SESSION_ID_HEADER] || crypto.randomUUID();
+  const accessToken = headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1] ?? options.apiKey;
+  const credential = readStoredCredential(PROVIDER_ID);
+  const oauthCredential =
+    credential?.type === "oauth" && credential.access === accessToken
+      ? (credential as SuperGrokCredentials)
+      : undefined;
+  const proxy = isCliChatProxyUrl(model.baseUrl);
+  applyGrokBuildProductHeaders(headers, {
+    convId: headers["x-grok-conv-id"] || sessionId,
+    reqId: `xai-perm-auto-${crypto.randomUUID()}`,
+    sessionId,
+    modelId: model.id,
+    agentId: getAgentId(),
+    accessToken: proxy ? accessToken : undefined,
+    userId: proxy ? oauthCredential?.userId : undefined,
+  });
+
+  headers[TOKEN_AUTH_HEADER.toLowerCase()] = proxy ? TOKEN_AUTH_VALUE : null;
+  headers[AUTHENTICATE_RESPONSE_HEADER] = proxy ? AUTHENTICATE_RESPONSE_VALUE : null;
+  headers.session_id = null;
+  return headers;
+}
+
+/** Apply the subscription wire contract for every caller, including direct runtime requests. */
+export function streamSuperGrok(
+  model: Model<Api>,
+  context: TranscriptContext,
+  options: SimpleStreamOptions & OpenAIResponsesOptions = {},
+) {
+  const requestModel: Model<"openai-responses"> = {
+    ...model,
+    api: "openai-responses",
+    headers: undefined,
+    compat: { ...model.compat, ...XAI_RESPONSES_COMPAT },
+  };
+  const requestOptions: SimpleStreamOptions & OpenAIResponsesOptions = {
+    ...options,
+    headers: requestHeaders(model, options),
+    onPayload: async (payload, requestModel) => {
+      const aligned = alignGrokBuildResponsesPayload(payload, { modelId: model.id });
+      const replacement = await options.onPayload?.(aligned, requestModel);
+      return alignGrokBuildResponsesPayload(replacement === undefined ? aligned : replacement, { modelId: model.id });
+    },
+  };
+  const streamResponses =
+    "reasoningEffort" in options || "reasoningSummary" in options || "serviceTier" in options
+      ? OPENAI_RESPONSES_API.stream
+      : OPENAI_RESPONSES_API.streamSimple;
+  return streamResponses(requestModel, context, requestOptions);
+}
+
 /** True for cli-chat-proxy production host, or loopback (local mock servers). */
 function isCliChatProxyUrl(url: string | undefined): boolean {
   if (!url) return false;
@@ -638,10 +718,10 @@ function isCliChatProxyUrl(url: string | undefined): boolean {
     const host = parsed.hostname;
     if (host === "cli-chat-proxy.grok.com") return true;
     // Match grok-build: loopback is always accepted for local mock servers.
-    if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
+    if (host === "localhost" || host === "127.0.0.1" || host === "[::1]") return true;
     return false;
   } catch {
-    return url.includes("cli-chat-proxy.grok.com");
+    return false;
   }
 }
 
@@ -766,6 +846,8 @@ export default function (pi: ExtensionAPI) {
     // Default base URL for OAuth (session) path; API key models get api.x.ai via refreshModels.
     baseUrl: oauthBaseUrl(),
     api: "openai-responses",
+    headers: productHeaders(),
+    streamSimple: streamSuperGrok,
     // Let models.json override the API key; env var $XAI_API_KEY is the ambient fallback.
     // Seed for cold start; refreshModels replaces with disk/remote entitlements.
     models: SEED_MODELS,
@@ -781,44 +863,4 @@ export default function (pi: ExtensionAPI) {
 
   // Catalog refresh is owned by Pi (register offline refresh, /model, pi update --models).
   // Login/token refresh still warm ~/.pi/agent/grok_models_cache.json.
-
-  let turnIndex = 0;
-  pi.on("turn_start", (event) => {
-    turnIndex = event.turnIndex;
-  });
-
-  pi.on("before_provider_request", (event, ctx) => {
-    if (ctx.model?.provider !== PROVIDER_ID) return;
-    return alignGrokBuildResponsesPayload(event.payload, { modelId: ctx.model.id });
-  });
-
-  pi.on("before_provider_headers", (event, ctx) => {
-    if (ctx.model?.provider !== PROVIDER_ID) return;
-
-    // Always sent (matches grok-build sampler Client::new + GrokRequestHeaders).
-    event.headers["user-agent"] = getUserAgent();
-    event.headers["x-grok-client-version"] = getClientVersion();
-    // sampler always injects this, even when SamplerConfig.client_identifier is None.
-    event.headers[CLIENT_IDENTIFIER_HEADER] = CLIENT_IDENTIFIER;
-    event.headers[CLIENT_MODE_HEADER] = CLIENT_MODE_VALUE;
-
-    const credential = readStoredCredential(PROVIDER_ID);
-    const oauthCredential = credential?.type === "oauth" ? (credential as SuperGrokCredentials) : undefined;
-    applyGrokBuildProductHeaders(event.headers, {
-      convId: ctx.sessionManager.getSessionId(),
-      reqId: `xai-perm-auto-${crypto.randomUUID()}`,
-      sessionId: ctx.sessionManager.getSessionId(),
-      modelId: ctx.model.id,
-      agentId: getAgentId(),
-      accessToken: oauthCredential?.access,
-      userId: oauthCredential?.userId,
-      turnIdx: String(turnIndex),
-    });
-
-    // Proxy-specific headers only when routing to cli-chat-proxy / loopback.
-    if (isCliChatProxyUrl(ctx.model.baseUrl)) {
-      event.headers[TOKEN_AUTH_HEADER] = TOKEN_AUTH_VALUE;
-      event.headers[AUTHENTICATE_RESPONSE_HEADER] = AUTHENTICATE_RESPONSE_VALUE;
-    }
-  });
 }

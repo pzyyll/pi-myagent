@@ -1,37 +1,35 @@
-// ABOUTME: Tests SuperGrok OAuth scopes and registered request-header behavior.
-// ABOUTME: Covers stored identity precedence and proxy-only authentication boundaries.
+// ABOUTME: Tests SuperGrok OAuth scopes and provider-level request registration.
+// ABOUTME: Checks fixed product headers without main-session event hooks.
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { OAuthLoginCallbacks } from "@earendil-works/pi-ai";
-import type {
-  BeforeProviderHeadersEvent,
-  ExtensionAPI,
-  ExtensionContext,
-  ProviderConfig,
-} from "@earendil-works/pi-coding-agent";
-import registerSuperGrok, { applyGrokBuildProductHeaders, PROVIDER_ID } from "../src/index";
+import type { ExtensionAPI, ProviderConfig } from "@earendil-works/pi-coding-agent";
+import registerSuperGrok, { applyGrokBuildProductHeaders } from "../src/index";
 
 function registerProvider() {
   let config: ProviderConfig | undefined;
-  let headersHandler: ((event: BeforeProviderHeadersEvent, ctx: ExtensionContext) => void) | undefined;
+  const events: string[] = [];
   registerSuperGrok({
     registerProvider: (_name: string, value: ProviderConfig) => {
       config = value;
     },
-    on: (name: string, handler: typeof headersHandler) => {
-      if (name === "before_provider_headers") headersHandler = handler;
+    on: (name: string) => {
+      events.push(name);
     },
   } as unknown as ExtensionAPI);
-  if (!config || !headersHandler) throw new Error("Provider registration is incomplete");
-  return { config, headersHandler };
+  if (!config) throw new Error("Provider registration is incomplete");
+  return { config, events };
 }
 
 function jwtWithSubject(subject: string): string {
   return `header.${Buffer.from(JSON.stringify({ sub: subject })).toString("base64url")}.signature`;
 }
 
+const NODE_LOADER_TIMEOUT_MS = 30_000;
 const PERSONAL_SCOPES = [
   "openid",
   "profile",
@@ -82,53 +80,44 @@ describe("request authentication", () => {
     expect(body?.get("referrer")).toBe("grok-build");
   });
 
-  it("prefers the stored team identity over access-token sub in the registered hook", () => {
-    writeFileSync(
-      join(tempHome, "auth.json"),
-      JSON.stringify({
-        [PROVIDER_ID]: {
-          type: "oauth",
-          access: jwtWithSubject("personal-user"),
-          refresh: "refresh-token",
-          expires: Number.MAX_SAFE_INTEGER,
-          userId: "team-principal",
-        },
-      }),
-    );
-    const { headersHandler } = registerProvider();
-    const event: BeforeProviderHeadersEvent = { type: "before_provider_headers", headers: {} };
-    headersHandler(event, {
-      model: { provider: PROVIDER_ID, id: "grok-build", baseUrl: "https://cli-chat-proxy.grok.com/v1" },
-      sessionManager: { getSessionId: () => "session-id" },
-    } as unknown as ExtensionContext);
-    expect(event.headers["x-grok-user-id"]).toBe("team-principal");
-    expect(event.headers["X-XAI-Token-Auth"]).toBe("xai-grok-cli");
-    expect(event.headers["x-authenticateresponse"]).toBe("authenticate-response");
+  it("registers fixed headers and streaming without main-session hooks", () => {
+    const { config, events } = registerProvider();
+    expect(config.headers?.["x-grok-client-version"]).toBe("1.0.46");
+    expect(config.headers?.["x-grok-client-identifier"]).toBe("grok-shell");
+    expect(config.headers?.["x-grok-client-mode"]).toBe("interactive");
+    expect(config.headers?.["User-Agent"]).toMatch(/^grok-shell\/1\.0\.46 \(/);
+    expect(config.streamSimple).toBeFunction();
+    expect(events).toEqual([]);
   });
+
+  it(
+    "loads through Pi's Node extension loader",
+    () => {
+      const script = `
+        const { loadExtensions } = await import(new URL("./core/extensions/loader.js", import.meta.resolve("@earendil-works/pi-coding-agent")));
+        const result = await loadExtensions([process.argv[1]], process.cwd());
+        console.log(JSON.stringify({ extensions: result.extensions.length, errors: result.errors }));
+        if (result.errors.length) process.exitCode = 1;
+      `;
+      const child = spawnSync(
+        "node",
+        ["--input-type=module", "-e", script, fileURLToPath(new URL("../src/index.ts", import.meta.url))],
+        {
+          cwd: fileURLToPath(new URL("../../../", import.meta.url)),
+          encoding: "utf8",
+          timeout: NODE_LOADER_TIMEOUT_MS,
+        },
+      );
+      expect(child.error).toBeUndefined();
+      expect(child.status).toBe(0);
+      expect(JSON.parse(child.stdout)).toEqual({ extensions: 1, errors: [] });
+    },
+    NODE_LOADER_TIMEOUT_MS,
+  );
 
   it("falls back to JWT sub when the stored userId is empty", () => {
     const headers: Record<string, string | null> = {};
     applyGrokBuildProductHeaders(headers, { userId: "", accessToken: jwtWithSubject("personal-user") });
     expect(headers["x-grok-user-id"]).toBe("personal-user");
-  });
-
-  it("sends client mode to API endpoints without proxy authentication headers", () => {
-    const { headersHandler } = registerProvider();
-    const event: BeforeProviderHeadersEvent = { type: "before_provider_headers", headers: {} };
-    headersHandler(event, {
-      model: { provider: PROVIDER_ID, id: "grok-build", baseUrl: "https://api.x.ai/v1" },
-      sessionManager: { getSessionId: () => "session-id" },
-    } as unknown as ExtensionContext);
-    expect(event.headers["x-grok-client-mode"]).toBe("interactive");
-    expect(event.headers["X-XAI-Token-Auth"]).toBeUndefined();
-    expect(event.headers["x-authenticateresponse"]).toBeUndefined();
-    expect(event.headers["x-grok-user-id"]).toBeUndefined();
-  });
-
-  it("does not change headers for other providers", () => {
-    const { headersHandler } = registerProvider();
-    const event: BeforeProviderHeadersEvent = { type: "before_provider_headers", headers: {} };
-    headersHandler(event, { model: { provider: "xai" } } as unknown as ExtensionContext);
-    expect(event.headers).toEqual({});
   });
 });
