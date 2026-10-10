@@ -1,3 +1,5 @@
+// ABOUTME: Defines repository-wide ESLint rules for source and test files.
+// ABOUTME: Excludes generated files and nested Git worktrees from lint checks.
 import js from "@eslint/js";
 import eslintConfigPrettier from "eslint-config-prettier/flat";
 import { defineConfig } from "eslint/config";
@@ -5,7 +7,7 @@ import tseslint from "typescript-eslint";
 
 export default defineConfig(
   {
-    ignores: ["node_modules/**", "dist/**", "build/**", "coverage/**", "*.lock", "*.tsbuildinfo"],
+    ignores: [".worktrees/**", "node_modules/**", "dist/**", "build/**", "coverage/**", "*.lock", "*.tsbuildinfo"],
   },
   {
     languageOptions: {
