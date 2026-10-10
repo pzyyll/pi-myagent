@@ -51,6 +51,8 @@ Bar color: green below 70%, yellow 70–89%, red at 90%+.
 - OAuth channels (`openai-codex`, `xai-supergrok`) poll only while that provider is authenticated via OAuth. API-key / BYOK mode for those providers does not poll: their billing APIs reject API keys with HTTP 401.
 - OpenCode Go (`opencode-go`) polls with the configured API key.
 - Fetches on session start and model selection, then polls every 2 minutes.
+- Keeps the last successful result for each channel in memory. Switching models shows that channel's cached status immediately. The extension queries a channel immediately if its cache is missing or older than 2 minutes.
+- Clears the cache when the session shuts down. The extension does not write the cache to disk.
 - Resolves credentials through Pi's model registry (`getApiKeyAndHeaders`), so Pi handles OAuth refresh for Codex and SuperGrok.
 - Grok requests inject cli-chat-proxy product headers (`X-XAI-Token-Auth: xai-grok-cli`, client version/identifier/mode, optional `x-userid` from JWT).
 - Transient network failures and request timeouts are retried up to three total attempts with exponential backoff.

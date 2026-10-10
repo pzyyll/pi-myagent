@@ -1,5 +1,5 @@
 // ABOUTME: Pi extension showing multi-channel subscription usage in footer and /usages.
-// ABOUTME: Polls the active model channel; /usages lets you pick any supported channel.
+// ABOUTME: Shows each channel's cached status immediately and polls the active channel.
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
@@ -13,18 +13,17 @@ import {
   type ResolvedAuth,
   type UsageChannel,
 } from "./channels";
+import { USAGE_POLL_INTERVAL_MS, UsageCache } from "./usage-cache";
 
 const STATUS_KEY = "usage-bars";
-const POLL_INTERVAL_MS = 2 * 60 * 1_000;
-const FRESH_FETCH_MS = 5_000;
 
 export default function (pi: ExtensionAPI) {
   let timer: ReturnType<typeof setInterval> | undefined;
   let abort: AbortController | undefined;
   let generation = 0;
   let fetching = false;
-  let lastFetchAt = 0;
   let notifiedFailure = false;
+  const cache = new UsageCache<ChannelUsageView>();
 
   const clearTimer = () => {
     if (timer) {
@@ -43,13 +42,19 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.setStatus(STATUS_KEY, undefined);
   };
 
-  const applyView = (ctx: ExtensionContext, view: ChannelUsageView) => {
-    if (view.windows.length > 0) {
+  const publishStatus = (ctx: ExtensionContext, view: ChannelUsageView | undefined) => {
+    if (view && view.windows.length > 0) {
       ctx.ui.setStatus(
         STATUS_KEY,
         view.renderStatus((color, text) => ctx.ui.theme.fg(color, text)),
       );
+      return;
     }
+    ctx.ui.setStatus(STATUS_KEY, undefined);
+  };
+
+  const remember = (view: ChannelUsageView) => {
+    cache.set(view.channelId, view, Date.now());
   };
 
   const resolveAuth = async (
@@ -86,7 +91,6 @@ export default function (pi: ExtensionAPI) {
     model: Model<any>,
   ): Promise<{ ok: true; view: ChannelUsageView } | { ok: false; error: string; aborted?: boolean }> => {
     const gen = generation;
-    lastFetchAt = Date.now();
     const authResult = await resolveAuth(ctx, model);
     if (gen !== generation) return { ok: false, error: "usage-bar: cancelled", aborted: true };
     if (!authResult.ok) return authResult;
@@ -111,13 +115,16 @@ export default function (pi: ExtensionAPI) {
   };
 
   const refresh = async (ctx: ExtensionContext, channel: UsageChannel, model: Model<any>) => {
+    const gen = generation;
     const result = await fetchChannelUsage(ctx, channel, model);
+    if (gen !== generation) return;
     if (!result.ok) {
       if (!result.aborted) notifyOnce(ctx, result.error);
       return;
     }
     notifiedFailure = false;
-    applyView(ctx, result.view);
+    remember(result.view);
+    publishStatus(ctx, result.view);
   };
 
   const poll = (ctx: ExtensionContext, channel: UsageChannel, model: Model<any>) => {
@@ -130,7 +137,7 @@ export default function (pi: ExtensionAPI) {
 
   const startTimer = (ctx: ExtensionContext, channel: UsageChannel, model: Model<any>) => {
     clearTimer();
-    timer = setInterval(() => poll(ctx, channel, model), POLL_INTERVAL_MS);
+    timer = setInterval(() => poll(ctx, channel, model), USAGE_POLL_INTERVAL_MS);
   };
 
   const notifyOnce = (ctx: ExtensionContext, message: string) => {
@@ -147,7 +154,9 @@ export default function (pi: ExtensionAPI) {
     if (model && channel && authOk) {
       generation++;
       abort?.abort();
-      if (Date.now() - lastFetchAt > FRESH_FETCH_MS) void refresh(ctx, channel, model);
+      const plan = cache.planSwitch(channel.id, Date.now());
+      publishStatus(ctx, plan.cached);
+      if (plan.refresh) void refresh(ctx, channel, model);
       startTimer(ctx, channel, model);
     } else {
       deactivate(ctx);
@@ -204,8 +213,9 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("usages", {
     description: "Pick a supported channel and show its plan usage details",
     handler: async (_args, ctx) => {
+      const gen = generation;
       const channel = await pickChannel(ctx);
-      if (!channel) return;
+      if (gen !== generation || !channel) return;
 
       const model = resolveModelForChannel(channel, ctx.modelRegistry.getAvailable(), ctx.model);
       if (!model) {
@@ -218,18 +228,23 @@ export default function (pi: ExtensionAPI) {
       }
 
       const result = await fetchChannelUsage(ctx, channel, model);
+      if (gen !== generation) return;
       if (!result.ok) {
         if (!result.aborted) ctx.ui.notify(result.error, "warning");
         return;
       }
       notifiedFailure = false;
+      remember(result.view);
       await showPlanDetails(ctx, result.view);
     },
   });
 
   pi.on("session_start", (_event, ctx) => sync(ctx, ctx.model));
   pi.on("model_select", (event, ctx) => sync(ctx, event.model));
-  pi.on("session_shutdown", (_event, ctx) => deactivate(ctx));
+  pi.on("session_shutdown", (_event, ctx) => {
+    cache.clear();
+    deactivate(ctx);
+  });
 }
 
 function stripAnsi(text: string): string {
