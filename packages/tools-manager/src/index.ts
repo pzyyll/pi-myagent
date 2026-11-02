@@ -1,5 +1,5 @@
 // ABOUTME: Registers a /tools-manager command for toggling Pi tools from an interactive settings list.
-// ABOUTME: Persists the active tool selection in session entries and restores it across reloads and tree navigation.
+// ABOUTME: Preserves Pi's native tool state and restores custom snapshots only for legacy session branches.
 import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@earendil-works/pi-coding-agent";
 import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { Container, type SettingItem, SettingsList, Text } from "@earendil-works/pi-tui";
@@ -24,11 +24,17 @@ export default function toolsManagerExtension(pi: ExtensionAPI) {
     pi.setActiveTools(Array.from(enabledTools));
   }
 
-  function restoreFromBranch(ctx: ExtensionContext) {
+  function restoreFromBranch(ctx: ExtensionContext, restoreLegacy = true) {
     allTools = pi.getAllTools();
+    const branch = ctx.sessionManager.getBranch();
+
+    if (!restoreLegacy || branch.some((entry) => entry.type === "message" && entry.message.role === "system")) {
+      enabledTools = new Set(pi.getActiveTools());
+      return;
+    }
 
     let savedTools: string[] | undefined;
-    for (const entry of ctx.sessionManager.getBranch()) {
+    for (const entry of branch) {
       if (entry.type !== "custom" || entry.customType !== CUSTOM_TYPE) continue;
       const data = entry.data as ToolsState | undefined;
       if (Array.isArray(data?.enabledTools)) savedTools = data.enabledTools;
@@ -88,6 +94,7 @@ export default function toolsManagerExtension(pi: ExtensionAPI) {
         container.addChild(settingsList);
 
         return {
+          capturesViewportInput: settingsList.capturesViewportInput,
           render: (width: number) => container.render(width),
           invalidate: () => container.invalidate(),
           handleInput: (data: string) => {
@@ -99,8 +106,8 @@ export default function toolsManagerExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.on("session_start", async (_event, ctx) => {
-    restoreFromBranch(ctx);
+  pi.on("session_start", async (event, ctx) => {
+    restoreFromBranch(ctx, event.reason !== "reload");
   });
 
   pi.on("session_tree", async (_event, ctx) => {
