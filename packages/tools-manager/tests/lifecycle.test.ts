@@ -28,6 +28,11 @@ const PAGE_UP = "\x1b[5~";
 const ENTER = "\r";
 const ESCAPE = "\x1b";
 
+type ToolSelectionCase = {
+  tools: readonly string[];
+  expected: readonly string[];
+};
+
 function recordTools(manager: SessionManager, names: string[]) {
   const tools = createCodingTools(manager.getCwd());
   return manager.appendMessage({
@@ -141,7 +146,7 @@ describe("tools-manager restoration", () => {
     { tools: ["+write"], expected: ["read", "write"] },
     { tools: ["-read"], expected: [] },
     { tools: ["read", "bash"], expected: ["read", "bash"] },
-  ])("preserves the tools option %j", async ({ tools, expected }) => {
+  ])("preserves the tools option %j", async ({ tools, expected }: ToolSelectionCase) => {
     const { session } = await fixture(
       (manager) => {
         recordTools(manager, ["read"]);
