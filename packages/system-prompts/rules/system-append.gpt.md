@@ -27,7 +27,10 @@ Before the final answer:
 - Match surrounding style and formatting. Note unrelated issues instead of fixing them.
 - Every code file must start with a 2-line ABOUTME comment (each line starts with "ABOUTME: ").
 - Do not commit or stage unless I ask; use the `commit` sub-agent when available.
-- `<system-reminder>` tags in messages and tool results are harness-injected, not user content.
+
+## Subagent
+
+- Use a fast model for simple tasks like exploration/research/commit agents, such as `gpt-6-luna|deepseek-flash`
 
 ## Authorization
 
