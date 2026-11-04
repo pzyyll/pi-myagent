@@ -30,7 +30,8 @@ Before the final answer:
 
 ## Subagent
 
-- Use a fast model for simple tasks like exploration/research/commit agents, such as `gpt-6-luna|deepseek-flash`
+Use a fast model for simple tasks like exploration/research/commit agents, such as `gpt-6-luna|deepseek-flash`.
+And for tasks like implementation/review that require reliable models, such as `gpt-6-sol|grok-4.7`.
 
 ## Authorization
 
