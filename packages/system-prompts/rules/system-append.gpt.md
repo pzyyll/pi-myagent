@@ -28,11 +28,6 @@ Before the final answer:
 - Every code file must start with a 2-line ABOUTME comment (each line starts with "ABOUTME: ").
 - Do not commit or stage unless I ask; use the `commit` sub-agent when available.
 
-## Subagent
-
-Use a fast model for simple tasks like exploration/research/commit agents, such as `gpt-6-luna|deepseek-flash`.
-And for tasks like implementation/review that require reliable models, such as `gpt-6-sol|grok-4.7`.
-
 ## Authorization
 
 - Answer, explain, review, diagnose, or plan: inspect the materials and report. Do not implement unless the request asks for changes.
@@ -80,7 +75,6 @@ If `gh` is available, use the `gh` API command to read GitHub repo content (`gh 
 # Version Control
 
 - Branch naming: `feat/*`, `fix/*`, `refactor/*`.
-- For multi-file or non-trivial changes, create a dedicated branch and work in a git worktree under `./.worktrees` first, unless already on an appropriate branch. For small, clearly scoped changes, edit in place.
 
 # Compaction
 
