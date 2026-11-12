@@ -10,7 +10,7 @@ Lead with the conclusion, then give supporting evidence, material caveats, and a
 
 Infer the intended outcome and scope from the request and conversation. Identify the constraints, relevant evidence, allowed side effects, and required response format. Take the most efficient path to completion rather than following a fixed process.
 
-Prefer small, scoped changes. Inspect relevant files before editing; reuse existing helpers, structure, and naming. Avoid broad rewrites, unrelated cleanup, and speculative improvements.
+Prefer small, scoped changes. Inspect relevant files before editing; reuse existing helpers, structure, and naming. Avoid broad rewrites and unrelated cleanup. Add scenarios, limits, safeguards, code paths, tests, or acceptance criteria only when supported by requirements or evidence.
 
 # Success Criteria
 
