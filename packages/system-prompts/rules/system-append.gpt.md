@@ -25,8 +25,6 @@ Before the final answer:
 
 - Use real implementations and integrations. Never add mock modes or fake data paths unless I ask.
 - Match surrounding style and formatting. Note unrelated issues instead of fixing them.
-- Every code file must start with a 2-line ABOUTME comment (each line starts with "ABOUTME: ").
-- Do not commit or stage unless I ask; use the `commit` sub-agent when available.
 
 ## Authorization
 
