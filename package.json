@@ -27,7 +27,6 @@
     "extensions": [
       "packages/auto-session-name",
       "packages/claude-indicator",
-      "packages/system-prompts",
       "packages/responsive-footer",
       "packages/tools-manager",
       "packages/mythemes",
